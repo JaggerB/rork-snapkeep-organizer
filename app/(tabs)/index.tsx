@@ -27,9 +27,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 
 
-type Mode = "Do" | "Think";
 type DoFilter = "All" | "This Week" | "Upcoming" | "Anytime" | "Map";
-type ThinkFilter = "All" | "Buy" | "Learn";
 
 
 function isDoItem(item: SavedItem): boolean {
@@ -271,69 +269,9 @@ function DoCard({ item }: { item: SavedItem }) {
   );
 }
 
-function ThinkCard({ item }: { item: SavedItem }) {
-  const [imageError, setImageError] = useState(false);
-  const handlePress = useCallback(() => {
-    router.push({ pathname: "/modal", params: { id: item.id } });
-  }, [item.id]);
 
-  console.log("[ThinkCard] item:", item.id, "imageUri:", item.imageUri ? item.imageUri.substring(0, 50) + "..." : "null");
 
-  const tag = getThinkTag(item);
 
-  return (
-    <Pressable
-      style={({ pressed }) => [styles.thinkCard, pressed && styles.cardPressed]}
-      onPress={handlePress}
-      testID={`think_item_${item.id}`}
-    >
-      <View style={styles.thinkCardThumb}>
-        {item.imageUri && !imageError ? (
-          <Image
-            source={{ uri: item.imageUri }}
-            style={styles.thinkCardImage}
-            contentFit="cover"
-            onError={(e) => {
-              console.log("[ThinkCard] image error for", item.id, e);
-              setImageError(true);
-            }}
-          />
-        ) : (
-          <View style={styles.thinkCardPlaceholder}>
-            <Bookmark size={12} color="rgba(11, 18, 32, 0.12)" />
-          </View>
-        )}
-      </View>
-      <View style={styles.thinkCardContent}>
-        <Text style={styles.thinkCardTitle}>{item.title}</Text>
-        <View style={styles.thinkCardTagWrap}>
-          <Text style={styles.thinkCardTag}>{tag}</Text>
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
-function ModeToggle({ mode, onModeChange }: { mode: Mode; onModeChange: (m: Mode) => void }) {
-  return (
-    <View style={styles.modeToggleContainer}>
-      <View style={styles.modeToggle}>
-        <Pressable
-          style={[styles.modeTab, mode === "Do" && styles.modeTabActive]}
-          onPress={() => onModeChange("Do")}
-        >
-          <Text style={[styles.modeTabLabel, mode === "Do" && styles.modeTabLabelActive]}>Do</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.modeTab, mode === "Think" && styles.modeTabActive]}
-          onPress={() => onModeChange("Think")}
-        >
-          <Text style={[styles.modeTabLabel, mode === "Think" && styles.modeTabLabelActive]}>Think</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
 
 // Dynamic import for Web Maps to avoid Native crashes
 let WebGoogleMap: any, WebLoadScript: any, WebMarker: any;
@@ -606,9 +544,7 @@ function DoSection({
   if (filter === "Map") {
     return (
       <View style={styles.doSection}>
-        <View style={styles.doHeader}>
-          <Text style={styles.doSubtitle}>Things you might actually do</Text>
-        </View>
+
         <View style={styles.pillRow}>
           {filters.map((f) => (
             <Pressable
@@ -628,9 +564,7 @@ function DoSection({
 
   return (
     <View style={styles.doSection}>
-      <View style={styles.doHeader}>
-        <Text style={styles.doSubtitle}>Things you might actually do</Text>
-      </View>
+
       <View style={styles.pillRow}>
         {filters.map((f) => {
           const isActive = filter === f;
@@ -675,81 +609,16 @@ function DoSection({
   );
 }
 
-function ThinkSection({
-  items,
-  filter,
-  onFilterChange
-}: {
-  items: SavedItem[];
-  filter: ThinkFilter;
-  onFilterChange: (f: ThinkFilter) => void;
-}) {
-  const filters: ThinkFilter[] = ["All", "Buy", "Learn"];
 
-  const filteredItems = useMemo(() => {
-    if (filter === "All") return items;
-    return items.filter((it) => getThinkTag(it) === filter);
-  }, [items, filter]);
-
-  return (
-    <View style={styles.thinkSection}>
-      <View style={styles.thinkHeader}>
-        <Text style={styles.thinkSubtitle}>Things to remember or revisit</Text>
-      </View>
-      <View style={styles.pillRowThink}>
-        {filters.map((f) => (
-          <Pressable
-            key={f}
-            onPress={() => onFilterChange(f)}
-            style={[styles.pillThink, filter === f && styles.pillThinkActive]}
-          >
-            <Text style={[styles.pillTextThink, filter === f && styles.pillTextThinkActive]}>{f}</Text>
-          </Pressable>
-        ))}
-      </View>
-      {filteredItems.length === 0 ? (
-        <View style={styles.thinkEmptyState}>
-          <Text style={styles.thinkEmptyText}>Nothing saved yet</Text>
-        </View>
-      ) : (
-        <View style={styles.thinkList}>
-          {filteredItems.map((item) => (
-            <ThinkCard key={item.id} item={item} />
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
 
 export default function LibraryScreen() {
   const { items, isLoading } = useSavedItems();
   const { user, signOut } = useAuth();
-  const [mode, setMode] = useState<Mode>("Do");
   const [doFilter, setDoFilter] = useState<DoFilter>("All");
-  const [thinkFilter, setThinkFilter] = useState<ThinkFilter>("All");
   const insets = useSafeAreaInsets();
 
-  const { doItems, thinkItems } = useMemo(() => {
-    const doList: SavedItem[] = [];
-    const thinkList: SavedItem[] = [];
-
-    items.forEach((item) => {
-      const isDo = isDoItem(item);
-      const isThink = isThinkItem(item);
-
-      console.log(`[Categorize] ${item.title}: isDo=${isDo}, isThink=${isThink}, cat=${item.category}, hasDate=${!!item.dateTimeISO}, hasCoords=${!!item.coordinates}`);
-
-      // Think items take priority - if it's clearly a "think" item, put it there
-      // isDoItem already excludes clear Think items, so this logic is simpler now
-      if (isDo) {
-        doList.push(item);
-      } else {
-        thinkList.push(item);
-      }
-    });
-
-    doList.sort((a, b) => {
+  const sortedItems = useMemo(() => {
+    return [...items].sort((a, b) => {
       if (a.dateTimeISO && b.dateTimeISO) {
         return new Date(a.dateTimeISO).getTime() - new Date(b.dateTimeISO).getTime();
       }
@@ -757,8 +626,6 @@ export default function LibraryScreen() {
       if (b.dateTimeISO) return 1;
       return 0;
     });
-
-    return { doItems: doList, thinkItems: thinkList };
   }, [items]);
 
   const empty = items.length === 0;
@@ -788,7 +655,7 @@ export default function LibraryScreen() {
           </View>
         </View>
 
-        <ModeToggle mode={mode} onModeChange={setMode} />
+
 
         {isLoading ? (
           <View style={styles.emptyState}>
@@ -814,11 +681,7 @@ export default function LibraryScreen() {
           </View>
         ) : (
           <View style={styles.sectionsWrap}>
-            {mode === "Do" ? (
-              <DoSection items={doItems} filter={doFilter} onFilterChange={setDoFilter} />
-            ) : (
-              <ThinkSection items={thinkItems} filter={thinkFilter} onFilterChange={setThinkFilter} />
-            )}
+            <DoSection items={sortedItems} filter={doFilter} onFilterChange={setDoFilter} />
           </View>
         )}
       </ScrollView>
@@ -875,51 +738,12 @@ const styles = StyleSheet.create({
   sectionsWrap: {
     flex: 1,
   },
-  modeToggleContainer: {
-    paddingHorizontal: 24,
-    marginBottom: 24,
-  },
-  modeToggle: {
-    flexDirection: "row" as const,
-    backgroundColor: "rgba(11, 18, 32, 0.06)",
-    borderRadius: 16,
-    padding: 4,
-  },
-  modeTab: {
-    flex: 1,
-    paddingVertical: 16,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    borderRadius: 14,
-  },
-  modeTabActive: {
-    backgroundColor: "#fff",
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
-  },
-  modeTabLabel: {
-    fontSize: 17,
-    fontWeight: "600" as const,
-    color: "rgba(11, 18, 32, 0.35)",
-    letterSpacing: -0.3,
-  },
-  modeTabLabelActive: {
-    color: Colors.light.text,
-  },
+
   doSection: {
     flex: 1,
     gap: 16,
   },
-  doHeader: {
-    paddingHorizontal: 24,
-  },
-  doSubtitle: {
-    fontSize: 14,
-    color: Colors.light.mutedText,
-  },
+
   pillRow: {
     flexDirection: "row" as const,
     gap: 8,
@@ -980,48 +804,7 @@ const styles = StyleSheet.create({
     fontWeight: "500" as const,
     color: Colors.light.tint,
   },
-  thinkSection: {
-    flex: 1,
-    gap: 16,
-  },
-  thinkHeader: {
-    paddingHorizontal: 24,
-  },
-  thinkSubtitle: {
-    fontSize: 14,
-    color: "rgba(11, 18, 32, 0.45)",
-  },
-  pillRowThink: {
-    flexDirection: "row" as const,
-    gap: 8,
-    paddingHorizontal: 24,
-  },
-  pillThink: {
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    backgroundColor: "rgba(11, 18, 32, 0.04)",
-  },
-  pillThinkActive: {
-    backgroundColor: "rgba(11, 18, 32, 0.08)",
-  },
-  pillTextThink: {
-    fontSize: 13,
-    fontWeight: "500" as const,
-    color: "rgba(11, 18, 32, 0.45)",
-  },
-  pillTextThinkActive: {
-    color: "rgba(11, 18, 32, 0.75)",
-    fontWeight: "600" as const,
-  },
-  thinkEmptyState: {
-    paddingHorizontal: 24,
-    paddingVertical: 32,
-  },
-  thinkEmptyText: {
-    fontSize: 14,
-    color: "rgba(11, 18, 32, 0.3)",
-  },
+
   doList: {
     gap: 2,
   },
@@ -1098,56 +881,7 @@ const styles = StyleSheet.create({
   doCardActionPressed: {
     backgroundColor: "rgba(28, 93, 153, 0.15)",
   },
-  thinkList: {
-    gap: 0,
-  },
-  thinkCard: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    gap: 12,
-  },
-  thinkCardThumb: {
-    width: 36,
-    height: 36,
-    borderRadius: 6,
-    backgroundColor: "#F0F0EE",
-    overflow: "hidden" as const,
-  },
-  thinkCardImage: {
-    width: "100%",
-    height: "100%",
-  },
-  thinkCardPlaceholder: {
-    flex: 1,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-  },
-  thinkCardContent: {
-    flex: 1,
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 8,
-  },
-  thinkCardTitle: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "500" as const,
-    color: "rgba(11, 18, 32, 0.7)",
-    letterSpacing: -0.1,
-  },
-  thinkCardTagWrap: {
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    backgroundColor: "rgba(11, 18, 32, 0.04)",
-  },
-  thinkCardTag: {
-    fontSize: 11,
-    fontWeight: "500" as const,
-    color: "rgba(11, 18, 32, 0.4)",
-  },
+
   emptyState: {
     alignItems: "center" as const,
     paddingVertical: 80,
