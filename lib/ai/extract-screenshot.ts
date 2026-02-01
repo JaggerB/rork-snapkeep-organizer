@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { generateObject } from "@rork-ai/toolkit-sdk";
+
 
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
 
@@ -147,35 +147,35 @@ function extractBase64FromDataUrl(imageDataUrl: string): { base64: string; mimeT
 
 async function extractWithGemini(imageDataUrl: string, retryCount: number = 0): Promise<z.infer<typeof ExtractSchema>> {
   const maxRetries = 3;
-  
+
   if (!GEMINI_API_KEY || GEMINI_API_KEY.trim() === '') {
     console.error('[Gemini] API key is missing or empty');
     throw new Error('GEMINI_API_KEY not configured');
   }
-  
+
   console.log('[Gemini] Starting extraction, attempt:', retryCount + 1);
   console.log('[Gemini] API Key length:', GEMINI_API_KEY.length);
-  
+
   const { base64, mimeType } = extractBase64FromDataUrl(imageDataUrl);
-  
+
   if (!base64 || base64.length < 100) {
     console.error('[Gemini] Invalid base64 data, length:', base64?.length);
     throw new Error('Invalid image data');
   }
-  
+
   console.log('[Gemini] Image mime type:', mimeType, 'base64 length:', base64.length);
-  
+
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-  
+
   const requestBody = {
     contents: [{
       parts: [
         { text: EXTRACTION_PROMPT },
-        { 
-          inline_data: { 
-            mime_type: mimeType, 
-            data: base64 
-          } 
+        {
+          inline_data: {
+            mime_type: mimeType,
+            data: base64
+          }
         }
       ]
     }],
@@ -192,7 +192,7 @@ async function extractWithGemini(imageDataUrl: string, retryCount: number = 0): 
       { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
     ],
   };
-  
+
   let response: Response;
   try {
     response = await withTimeout(
@@ -214,24 +214,24 @@ async function extractWithGemini(imageDataUrl: string, retryCount: number = 0): 
     }
     throw new Error('Network error - please check your connection and try again');
   }
-  
+
   const responseText = await response.text();
   console.log('[Gemini] Response status:', response.status);
   console.log('[Gemini] Response preview:', responseText.slice(0, 300));
-  
+
   if (!response.ok) {
     console.error('[Gemini] API error:', response.status, responseText.slice(0, 500));
-    
+
     if ((response.status === 429 || response.status >= 500) && retryCount < maxRetries) {
       const delayMs = 3000 * Math.pow(2, retryCount);
       console.log(`[Gemini] Rate limited or server error, retrying in ${delayMs}ms...`);
       await delay(delayMs);
       return extractWithGemini(imageDataUrl, retryCount + 1);
     }
-    
+
     throw new Error(`Gemini API error: ${response.status}`);
   }
-  
+
   let data: any;
   try {
     data = JSON.parse(responseText);
@@ -244,18 +244,18 @@ async function extractWithGemini(imageDataUrl: string, retryCount: number = 0): 
     }
     throw new Error('Invalid JSON response from Gemini');
   }
-  
+
   if (data.error) {
     console.error('[Gemini] API returned error:', data.error);
     throw new Error(`Gemini error: ${data.error.message || JSON.stringify(data.error)}`);
   }
-  
+
   const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  
+
   if (!textContent) {
     console.error('[Gemini] No text content in response');
     console.error('[Gemini] Full response:', JSON.stringify(data).slice(0, 500));
-    
+
     const finishReason = data.candidates?.[0]?.finishReason;
     if (finishReason === 'SAFETY') {
       throw new Error('Image blocked for safety reasons');
@@ -263,110 +263,52 @@ async function extractWithGemini(imageDataUrl: string, retryCount: number = 0): 
     if (finishReason === 'RECITATION') {
       throw new Error('Content blocked due to recitation policy');
     }
-    
+
     if (retryCount < maxRetries) {
       console.log('[Gemini] Retrying after empty response...');
       await delay(1000 * (retryCount + 1));
       return extractWithGemini(imageDataUrl, retryCount + 1);
     }
-    
+
     throw new Error('No content in Gemini response');
   }
-  
+
   console.log('[Gemini] Extracted text:', textContent.slice(0, 400));
-  
+
   let jsonStr = textContent.trim();
-  
+
   if (jsonStr.startsWith('```')) {
     jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?\s*```$/, '');
   }
-  
+
   const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     jsonStr = jsonMatch[0];
   }
-  
+
   console.log('[Gemini] Cleaned JSON:', jsonStr.slice(0, 300));
-  
+
   let parsed: any;
   try {
     parsed = JSON.parse(jsonStr);
   } catch {
     console.error('[Gemini] Failed to parse extracted JSON:', jsonStr.slice(0, 300));
-    
+
     if (retryCount < maxRetries) {
       console.log('[Gemini] Retrying after JSON extraction failed...');
       await delay(1000 * (retryCount + 1));
       return extractWithGemini(imageDataUrl, retryCount + 1);
     }
-    
+
     throw new Error('Failed to parse Gemini output as JSON');
   }
-  
+
   if (!parsed.title || typeof parsed.title !== 'string') {
     console.error('[Gemini] Missing or invalid title in parsed data:', parsed);
     throw new Error('Invalid data: missing title');
   }
-  
-  return ExtractSchema.parse(parsed);
-}
 
-async function attemptRorkExtraction(imageDataUrl: string): Promise<z.infer<typeof ExtractSchema> | null> {
-  console.log('[Rork] Starting extraction...');
-  
-  try {
-    const result = await withTimeout(
-      generateObject({
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: EXTRACTION_PROMPT },
-            { type: "image", image: imageDataUrl },
-          ],
-        },
-      ],
-        schema: ExtractSchema,
-      }),
-      45000,
-      'Rork extraction timed out'
-    );
-    
-    if (!result) {
-      console.warn('[Rork] Received null/undefined result');
-      return null;
-    }
-    
-    console.log('[Rork] Raw result type:', typeof result);
-    
-    if (typeof result === 'string') {
-      const strResult = result as string;
-      console.warn('[Rork] Received string instead of object:', strResult.slice(0, 100));
-      try {
-        const parsed = JSON.parse(strResult);
-        if (parsed && parsed.title) {
-          console.log('[Rork] Parsed string result successfully');
-          return ExtractSchema.parse(parsed);
-        }
-      } catch {
-        console.warn('[Rork] Failed to parse string result as JSON');
-      }
-      return null;
-    }
-    
-    console.log('[Rork] Raw result:', JSON.stringify(result).slice(0, 200));
-    
-    if (result && typeof result === "object" && 'title' in result && result.title) {
-      return result;
-    }
-    
-    console.warn('[Rork] Invalid result structure:', Object.keys(result));
-    return null;
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.error('[Rork] Error:', errMsg);
-    return null;
-  }
+  return ExtractSchema.parse(parsed);
 }
 
 export async function extractDetailsFromScreenshot(params: {
@@ -376,71 +318,43 @@ export async function extractDetailsFromScreenshot(params: {
 
   console.log("[extractDetailsFromScreenshot] Starting...");
   console.log("[extractDetailsFromScreenshot] Image data length:", imageDataUrl?.length);
-  console.log("[extractDetailsFromScreenshot] Has Gemini key:", !!GEMINI_API_KEY);
+  console.log("[extractDetailsFromScreenshot] Using Gemini 2.0 Flash directly");
 
   if (!imageDataUrl || imageDataUrl.length < 100) {
     throw new Error("Invalid image data provided");
   }
 
-  let lastError: Error | null = null;
-
-  const rorkResult = await attemptRorkExtraction(imageDataUrl);
-  
-  if (rorkResult) {
-    console.log("[extractDetailsFromScreenshot] Rork success:", rorkResult.title);
-    return {
-      title: rorkResult.title,
-      notes: rorkResult.notes ?? null,
-      dateTimeISO: rorkResult.dateTimeISO ?? null,
-      location: rorkResult.location ?? null,
-      streetAddress: rorkResult.streetAddress ?? null,
-      neighborhood: rorkResult.neighborhood ?? null,
-      city: rorkResult.city ?? null,
-      state: rorkResult.state ?? null,
-      country: rorkResult.country ?? null,
-      category: rorkResult.category ?? null,
-      source: rorkResult.source ?? null,
-      confidence: rorkResult.confidence ?? null,
-      raw: rorkResult.raw ?? null,
-    };
+  if (!GEMINI_API_KEY || GEMINI_API_KEY.trim() === '') {
+    console.error("[extractDetailsFromScreenshot] No Gemini API key available");
+    throw new Error("Gemini API Key is missing in .env");
   }
-  
-  console.log("[extractDetailsFromScreenshot] Rork failed, trying Gemini...");
 
-  if (GEMINI_API_KEY && GEMINI_API_KEY.trim() !== '') {
-    try {
-      const geminiResult = await extractWithGemini(imageDataUrl);
-      
-      if (geminiResult && geminiResult.title) {
-        console.log("[extractDetailsFromScreenshot] Gemini success:", geminiResult.title);
-        return {
-          title: geminiResult.title,
-          notes: geminiResult.notes ?? null,
-          dateTimeISO: geminiResult.dateTimeISO ?? null,
-          location: geminiResult.location ?? null,
-          streetAddress: geminiResult.streetAddress ?? null,
-          neighborhood: geminiResult.neighborhood ?? null,
-          city: geminiResult.city ?? null,
-          state: geminiResult.state ?? null,
-          country: geminiResult.country ?? null,
-          category: geminiResult.category ?? null,
-          source: geminiResult.source ?? null,
-          confidence: geminiResult.confidence ?? null,
-          raw: geminiResult.raw ?? null,
-        };
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error("[extractDetailsFromScreenshot] Gemini error:", errorMessage);
-      lastError = err instanceof Error ? err : new Error(errorMessage);
+  try {
+    const geminiResult = await extractWithGemini(imageDataUrl);
+
+    if (geminiResult && geminiResult.title) {
+      console.log("[extractDetailsFromScreenshot] Gemini success:", geminiResult.title);
+      return {
+        title: geminiResult.title,
+        notes: geminiResult.notes ?? null,
+        dateTimeISO: geminiResult.dateTimeISO ?? null,
+        location: geminiResult.location ?? null,
+        streetAddress: geminiResult.streetAddress ?? null,
+        neighborhood: geminiResult.neighborhood ?? null,
+        city: geminiResult.city ?? null,
+        state: geminiResult.state ?? null,
+        country: geminiResult.country ?? null,
+        category: geminiResult.category ?? null,
+        source: geminiResult.source ?? null,
+        confidence: geminiResult.confidence ?? null,
+        raw: geminiResult.raw ?? null,
+      };
     }
-  } else {
-    console.warn("[extractDetailsFromScreenshot] No Gemini API key available for fallback");
-    lastError = new Error("Primary service unavailable and no fallback configured");
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("[extractDetailsFromScreenshot] Gemini error:", errorMessage);
+    throw new Error(`Failed to analyze screenshot: ${errorMessage}`);
   }
 
-  console.error("[extractDetailsFromScreenshot] All extraction methods failed");
-  
-  const errorMsg = lastError?.message || 'All extraction methods failed';
-  throw new Error(`Failed to analyze screenshot: ${errorMsg}`);
+  throw new Error("Failed to analyze screenshot: No result from Gemini");
 }

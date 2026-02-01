@@ -17,8 +17,8 @@ import {
 import MapView, { Marker, Region } from "react-native-maps";
 
 const DEFAULT_REGION: Region = {
-  latitude: 37.7749,
-  longitude: -122.4194,
+  latitude: -37.8136,
+  longitude: 144.9631,
   latitudeDelta: 0.5,
   longitudeDelta: 0.5,
 };

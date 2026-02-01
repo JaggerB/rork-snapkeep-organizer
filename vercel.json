@@ -1,0 +1,12 @@
+{
+    "buildCommand": "npx expo export --platform web",
+    "outputDirectory": "dist",
+    "devCommand": "npx expo start --web",
+    "framework": null,
+    "installCommand": "npm install",
+    "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "@supabase_url",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "@supabase_anon_key",
+        "EXPO_PUBLIC_GEMINI_API_KEY": "@gemini_api_key"
+    }
+}

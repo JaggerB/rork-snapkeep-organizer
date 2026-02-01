@@ -11,7 +11,7 @@ import {
   Plus,
   Map,
 } from "lucide-react-native";
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import MapView, { Marker } from "react-native-maps";
 import {
   Linking,
@@ -26,9 +26,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 
 
+
 type Mode = "Do" | "Think";
-type DoFilter = "All" | "Now" | "Upcoming" | "Map";
+type DoFilter = "All" | "This Week" | "Upcoming" | "Anytime" | "Map";
 type ThinkFilter = "All" | "Buy" | "Learn";
+
 
 function isDoItem(item: SavedItem): boolean {
   const cat = (item.category || "").toLowerCase();
@@ -36,7 +38,7 @@ function isDoItem(item: SavedItem): boolean {
   const notes = (item.notes || "").toLowerCase();
   const source = (item.source || "").toLowerCase();
   const combined = `${cat} ${title} ${notes} ${source}`;
-  
+
   // First, check if this is clearly a Think item - these should NEVER be in Do
   const thinkExclusions = [
     "domain", "url", "website", "godaddy", "namecheap", "hosting",
@@ -51,12 +53,12 @@ function isDoItem(item: SavedItem): boolean {
     "furniture", "decor", "gadget", "tech", "electronics",
     "app", "software", "tool", "subscription"
   ];
-  
+
   const isClearlyThink = thinkExclusions.some(kw => combined.includes(kw));
   if (isClearlyThink) {
     return false;
   }
-  
+
   // Do keywords - things you physically go to or attend
   const doKeywords = [
     "event", "events", "travel", "trip", "date night",
@@ -68,16 +70,16 @@ function isDoItem(item: SavedItem): boolean {
     "experience", "tour", "activity", "adventure",
     "visit", "venue", "location", "popup", "pop-up"
   ];
-  
+
   const hasDoKeyword = doKeywords.some(kw => combined.includes(kw));
-  
+
   // Has a specific date/time = likely actionable
   const hasDateTime = !!item.dateTimeISO;
-  
+
   // Category signals
   const doCategories = ["events", "travel", "date night", "hikes", "food"];
   const hasDoCat = doCategories.some(c => cat.includes(c));
-  
+
   return hasDoKeyword || hasDateTime || hasDoCat;
 }
 
@@ -87,7 +89,7 @@ function isThinkItem(item: SavedItem): boolean {
   const notes = (item.notes || "").toLowerCase();
   const source = (item.source || "").toLowerCase();
   const combined = `${cat} ${title} ${notes} ${source}`;
-  
+
   const thinkKeywords = [
     // Shopping / Buy
     "shop", "shopping", "buy", "purchase", "product", "price",
@@ -112,11 +114,11 @@ function isThinkItem(item: SavedItem): boolean {
     "fashion", "style", "outfit", "clothing", "shoes", "accessories",
     "furniture", "decor", "home", "design", "interior"
   ];
-  
+
   // Category signals
   const thinkCategories = ["shopping", "movies", "other"];
   const hasThinkCat = thinkCategories.some(c => cat.includes(c));
-  
+
   return thinkKeywords.some(kw => combined.includes(kw)) || hasThinkCat;
 }
 
@@ -126,7 +128,7 @@ function getThinkTag(item: SavedItem): "Buy" | "Learn" {
   const notes = (item.notes || "").toLowerCase();
   const source = (item.source || "").toLowerCase();
   const combined = `${cat} ${title} ${notes} ${source}`;
-  
+
   const buyKeywords = [
     "shop", "shopping", "buy", "purchase", "product",
     "price", "sale", "discount", "deal", "$",
@@ -137,7 +139,7 @@ function getThinkTag(item: SavedItem): "Buy" | "Learn" {
     "amazon", "etsy", "ebay", "shopify",
     "subscription", "service", "plan"
   ];
-  
+
   if (buyKeywords.some(kw => combined.includes(kw))) return "Buy";
   return "Learn";
 }
@@ -158,20 +160,28 @@ function formatTimeContext(isoDate: string | null | undefined): string | null {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function isNowItem(item: SavedItem): boolean {
+
+function isThisWeekItem(item: SavedItem): boolean {
   if (!item.dateTimeISO) return false;
   const date = new Date(item.dateTimeISO);
   const now = new Date();
   const diffMs = date.getTime() - now.getTime();
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  return diffHours >= -2 && diffHours <= 24;
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+  // Allow items from 2 hours ago up to 7 days in future
+  return diffDays >= -0.08 && diffDays <= 7;
 }
 
 function isUpcomingItem(item: SavedItem): boolean {
   if (!item.dateTimeISO) return false;
   const date = new Date(item.dateTimeISO);
   const now = new Date();
-  return date.getTime() > now.getTime();
+  const diffMs = date.getTime() - now.getTime();
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+  return diffDays > 7;
+}
+
+function isAnytimeItem(item: SavedItem): boolean {
+  return !item.dateTimeISO;
 }
 
 function DoCard({ item }: { item: SavedItem }) {
@@ -217,10 +227,10 @@ function DoCard({ item }: { item: SavedItem }) {
       <View style={styles.doCardThumbContainer}>
         <View style={styles.doCardThumb}>
           {item.imageUri && !imageError ? (
-            <Image 
-              source={{ uri: item.imageUri }} 
-              style={styles.doCardImage} 
-              contentFit="cover" 
+            <Image
+              source={{ uri: item.imageUri }}
+              style={styles.doCardImage}
+              contentFit="cover"
               onError={(e) => {
                 console.log("[DoCard] image error for", item.id, e);
                 setImageError(true);
@@ -279,9 +289,9 @@ function ThinkCard({ item }: { item: SavedItem }) {
     >
       <View style={styles.thinkCardThumb}>
         {item.imageUri && !imageError ? (
-          <Image 
-            source={{ uri: item.imageUri }} 
-            style={styles.thinkCardImage} 
+          <Image
+            source={{ uri: item.imageUri }}
+            style={styles.thinkCardImage}
             contentFit="cover"
             onError={(e) => {
               console.log("[ThinkCard] image error for", item.id, e);
@@ -325,15 +335,176 @@ function ModeToggle({ mode, onModeChange }: { mode: Mode; onModeChange: (m: Mode
   );
 }
 
+// Dynamic import for Web Maps to avoid Native crashes
+let WebGoogleMap: any, WebLoadScript: any, WebMarker: any;
+if (Platform.OS === "web") {
+  try {
+    const lib = require("@react-google-maps/api");
+    WebGoogleMap = lib.GoogleMap;
+    WebLoadScript = lib.LoadScript;
+    WebMarker = lib.Marker;
+  } catch (e) {
+    console.warn("Failed to load @react-google-maps/api", e);
+  }
+}
+
+const mapContainerStyle = {
+  width: '100%',
+  height: '100%',
+  borderRadius: '16px',
+};
+
+function WebMap({ items }: { items: SavedItem[] }) {
+  const locationItems = items.filter((it) => !!it.coordinates);
+  const [map, setMap] = useState<any>(null);
+
+  const onLoad = useCallback((mapInstance: any) => {
+    setMap(mapInstance);
+  }, []);
+
+  const center = useMemo(() => {
+    if (locationItems.length === 0) {
+      return { lat: -37.8136, lng: 144.9631 }; // Melbourne
+    }
+    const lats = locationItems.map(it => it.coordinates!.latitude);
+    const lngs = locationItems.map(it => it.coordinates!.longitude);
+    return {
+      lat: (Math.min(...lats) + Math.max(...lats)) / 2,
+      lng: (Math.min(...lngs) + Math.max(...lngs)) / 2,
+    };
+  }, [locationItems]);
+
+  // Adjust bounds when items or map changes
+  useEffect(() => {
+    if (map && locationItems.length > 0) {
+      const bounds = new window.google.maps.LatLngBounds();
+      locationItems.forEach(item => {
+        bounds.extend({ lat: item.coordinates!.latitude, lng: item.coordinates!.longitude });
+      });
+      map.fitBounds(bounds);
+
+      // If only one marker or very close, zoom might be too high. Adjust if needed.
+      // We use a listener for 'idle' to check zoom after bounds fit, 
+      // but simple fitBounds is usually enough. 
+      // For single items, fitBounds can zoom in MAX_ZOOM.
+      // Google Maps usually handles this but let's be safe.
+      if (locationItems.length === 1) {
+        // Force a reasonable zoom for single item if fitBounds goes too crazy
+        // Actually fitBounds with one point is effectively setCenter. 
+        // We can set a max zoom/listener, but let's try default fitBounds behavior first.
+        // Note: fitBounds with 1 point might yield max zoom. 
+        // Better:
+        map.setZoom(15);
+        map.setCenter({ lat: locationItems[0].coordinates!.latitude, lng: locationItems[0].coordinates!.longitude });
+      }
+    }
+  }, [map, locationItems]);
+
+
+  if (!process.env.EXPO_PUBLIC_GEMINI_API_KEY) {
+    return (
+      <View style={styles.webMapFallback}>
+        <Text style={styles.webMapFallbackTitle}>API Key Missing</Text>
+      </View>
+    );
+  }
+
+  // If libraries failed to load
+  if (!WebGoogleMap || !WebLoadScript) {
+    return (
+      <View style={styles.webMapFallback}>
+        <Text style={styles.webMapFallbackTitle}>Map Library Error</Text>
+        <Text>Could not load Google Maps library.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.mapViewContainer}>
+      <WebLoadScript googleMapsApiKey={process.env.EXPO_PUBLIC_GEMINI_API_KEY || ""}>
+        <WebGoogleMap
+          mapContainerStyle={mapContainerStyle}
+          center={center}
+          zoom={13}
+          onLoad={onLoad}
+          options={{
+            disableDefaultUI: false,
+            zoomControl: true,
+          }}
+        >
+          {locationItems.map(item => (
+            <WebMarker
+              key={item.id}
+              position={{
+                lat: item.coordinates!.latitude,
+                lng: item.coordinates!.longitude
+              }}
+              label={{
+                text: getCategoryEmoji(item.category),
+                fontSize: "24px",
+                className: "emoji-marker-label" // Optional if we had CSS
+              }}
+              title={item.title}
+              onClick={() => router.push({ pathname: "/modal", params: { id: item.id } })}
+            />
+          ))}
+        </WebGoogleMap>
+      </WebLoadScript>
+    </View>
+  );
+}
+
+// Helper for emoji mapping
+function getCategoryEmoji(category?: string | null): string {
+  const c = (category || "").toLowerCase();
+
+  // Specific food types
+  if (c.includes("pizza")) return "🍕";
+  if (c.includes("burger")) return "🍔";
+  if (c.includes("sushi")) return "🍣";
+  if (c.includes("bakery") || c.includes("bread") || c.includes("pastry")) return "🥐";
+  if (c.includes("ice cream")) return "🍦";
+
+  // General Food/Drink
+  if (c.includes("food") || c.includes("restaurant") || c.includes("dinner") || c.includes("lunch")) return "🍽️";
+  if (c.includes("bar") || c.includes("pub") || c.includes("alcohol")) return "🍺";
+  if (c.includes("wine")) return "🍷";
+  if (c.includes("cocktail")) return "🍸";
+  if (c.includes("coffee") || c.includes("cafe")) return "☕";
+
+  // Events/Activities
+  if (c.includes("event") || c.includes("concert") || c.includes("music")) return "🎫";
+  if (c.includes("art") || c.includes("museum") || c.includes("gallery")) return "🎨";
+  if (c.includes("movie") || c.includes("cinema") || c.includes("film")) return "🎬";
+
+  // Outdoors/Travel
+  if (c.includes("hike") || c.includes("hiking") || c.includes("nature") || c.includes("park")) return "🌲";
+  if (c.includes("beach")) return "🏖️";
+  if (c.includes("travel") || c.includes("hotel") || c.includes("stay")) return "✈️";
+
+  // Shopping
+  if (c.includes("shop") || c.includes("store") || c.includes("buy")) return "🛍️";
+
+  return "📍";
+}
+
 function DoMapView({ items }: { items: SavedItem[] }) {
   const locationItems = items.filter((it) => !!it.coordinates);
   const insets = useSafeAreaInsets();
 
+  console.log("[DoMapView] Rendering. Platform:", Platform.OS);
+  console.log("[DoMapView] Total Items:", items.length);
+  console.log("[DoMapView] Location Items:", locationItems.length);
+  if (locationItems.length > 0) {
+    console.log("[DoMapView] First Item Category:", locationItems[0].category, "Emoji:", getCategoryEmoji(locationItems[0].category));
+  }
+
   const initialRegion = useMemo(() => {
+    // Default to Melbourne if no items
     if (locationItems.length === 0) {
       return {
-        latitude: 37.78825,
-        longitude: -122.4324,
+        latitude: -37.8136,
+        longitude: 144.9631,
         latitudeDelta: 0.1,
         longitudeDelta: 0.1,
       };
@@ -344,11 +515,16 @@ function DoMapView({ items }: { items: SavedItem[] }) {
     const maxLat = Math.max(...lats);
     const minLng = Math.min(...lngs);
     const maxLng = Math.max(...lngs);
+
+    // Add some padding
+    const latDelta = (maxLat - minLat) * 1.5;
+    const lngDelta = (maxLng - minLng) * 1.5;
+
     return {
       latitude: (minLat + maxLat) / 2,
       longitude: (minLng + maxLng) / 2,
-      latitudeDelta: Math.max(0.05, (maxLat - minLat) * 1.5),
-      longitudeDelta: Math.max(0.05, (maxLng - minLng) * 1.5),
+      latitudeDelta: Math.max(0.05, latDelta),
+      longitudeDelta: Math.max(0.05, lngDelta),
     };
   }, [locationItems]);
 
@@ -356,39 +532,8 @@ function DoMapView({ items }: { items: SavedItem[] }) {
     router.push({ pathname: "/modal", params: { id: item.id } });
   }, []);
 
-  const handleItemPress = useCallback((item: SavedItem) => {
-    router.push({ pathname: "/modal", params: { id: item.id } });
-  }, []);
-
   if (Platform.OS === "web") {
-    return (
-      <View style={styles.mapViewContainer}>
-        <View style={styles.webMapFallback}>
-          <MapPin size={24} color="rgba(11, 18, 32, 0.3)" />
-          <Text style={styles.webMapFallbackTitle}>Map View</Text>
-          <Text style={styles.webMapFallbackText}>
-            {locationItems.length} location{locationItems.length !== 1 ? "s" : ""} saved
-          </Text>
-        </View>
-        <ScrollView style={styles.webMapList} contentContainerStyle={styles.webMapListContent}>
-          {locationItems.map((item) => (
-            <Pressable
-              key={item.id}
-              style={styles.webMapItem}
-              onPress={() => handleItemPress(item)}
-            >
-              <MapPin size={14} color="rgba(11, 18, 32, 0.4)" />
-              <View style={styles.webMapItemContent}>
-                <Text style={styles.webMapItemTitle}>{item.title}</Text>
-                {item.location && (
-                  <Text style={styles.webMapItemLocation}>{item.location}</Text>
-                )}
-              </View>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
-    );
+    return <WebMap items={items} />;
   }
 
   return (
@@ -396,6 +541,9 @@ function DoMapView({ items }: { items: SavedItem[] }) {
       <MapView
         style={styles.mapView}
         initialRegion={initialRegion}
+        showsUserLocation={true}
+        showsMyLocationButton={true}
+        provider={undefined} // Use default (Apple Maps on iOS, Google on Android)
       >
         {locationItems.map((item) => (
           <Marker
@@ -407,7 +555,11 @@ function DoMapView({ items }: { items: SavedItem[] }) {
             title={item.title}
             description={item.location || undefined}
             onCalloutPress={() => handleMarkerPress(item)}
-          />
+          >
+            <View style={styles.emojiMarker}>
+              <Text style={styles.emojiText}>{getCategoryEmoji(item.category)}</Text>
+            </View>
+          </Marker>
         ))}
       </MapView>
       {locationItems.length === 0 && (
@@ -422,25 +574,28 @@ function DoMapView({ items }: { items: SavedItem[] }) {
   );
 }
 
-function DoSection({ 
-  items, 
-  filter, 
-  onFilterChange 
-}: { 
-  items: SavedItem[]; 
-  filter: DoFilter; 
+
+function DoSection({
+  items,
+  filter,
+  onFilterChange
+}: {
+  items: SavedItem[];
+  filter: DoFilter;
   onFilterChange: (f: DoFilter) => void;
 }) {
-  const filters: DoFilter[] = ["All", "Now", "Upcoming", "Map"];
+  const filters: DoFilter[] = ["All", "This Week", "Upcoming", "Anytime", "Map"];
 
   const filteredItems = useMemo(() => {
     switch (filter) {
       case "All":
         return items;
-      case "Now":
-        return items.filter(isNowItem);
+      case "This Week":
+        return items.filter(isThisWeekItem);
       case "Upcoming":
         return items.filter(isUpcomingItem);
+      case "Anytime":
+        return items.filter(isAnytimeItem);
       case "Map":
         return items.filter((it) => !!it.coordinates || !!it.location);
       default:
@@ -497,7 +652,9 @@ function DoSection({
             <Calendar size={20} color="rgba(11, 18, 32, 0.25)" />
           </View>
           <Text style={styles.doEmptyText}>
-            {filter === "Now" ? "Nothing happening right now" : "Nothing coming up"}
+            {filter === "This Week" ? "Nothing happening this week" :
+              filter === "Upcoming" ? "Nothing coming up later" :
+                filter === "Anytime" ? "No undated items" : "Nothing found"}
           </Text>
           <Pressable
             onPress={() => router.push("/collect")}
@@ -518,13 +675,13 @@ function DoSection({
   );
 }
 
-function ThinkSection({ 
-  items, 
-  filter, 
-  onFilterChange 
-}: { 
-  items: SavedItem[]; 
-  filter: ThinkFilter; 
+function ThinkSection({
+  items,
+  filter,
+  onFilterChange
+}: {
+  items: SavedItem[];
+  filter: ThinkFilter;
   onFilterChange: (f: ThinkFilter) => void;
 }) {
   const filters: ThinkFilter[] = ["All", "Buy", "Learn"];
@@ -580,9 +737,9 @@ export default function LibraryScreen() {
     items.forEach((item) => {
       const isDo = isDoItem(item);
       const isThink = isThinkItem(item);
-      
+
       console.log(`[Categorize] ${item.title}: isDo=${isDo}, isThink=${isThink}, cat=${item.category}, hasDate=${!!item.dateTimeISO}, hasCoords=${!!item.coordinates}`);
-      
+
       // Think items take priority - if it's clearly a "think" item, put it there
       // isDoItem already excludes clear Think items, so this logic is simpler now
       if (isDo) {
@@ -1132,5 +1289,22 @@ const styles = StyleSheet.create({
   webMapItemLocation: {
     fontSize: 12,
     color: "rgba(11, 18, 32, 0.5)",
+  },
+  emojiMarker: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.05)",
+  },
+  emojiText: {
+    fontSize: 18,
   },
 });

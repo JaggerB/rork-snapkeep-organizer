@@ -28,6 +28,43 @@ import {
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 
+// Dynamic import for Web Maps to avoid Native crashes
+let WebGoogleMap: any, WebLoadScript: any, WebMarker: any;
+if (Platform.OS === "web") {
+  try {
+    const lib = require("@react-google-maps/api");
+    WebGoogleMap = lib.GoogleMap;
+    WebLoadScript = lib.LoadScript;
+    WebMarker = lib.Marker;
+  } catch (e) {
+    console.warn("Failed to load @react-google-maps/api", e);
+  }
+}
+
+function WebMapPreview({ coordinates }: { coordinates: { latitude: number; longitude: number } }) {
+  if (!process.env.EXPO_PUBLIC_GEMINI_API_KEY) return null;
+  if (!WebGoogleMap || !WebLoadScript) return null;
+
+  return (
+    <View style={styles.mapPreview}>
+      <WebLoadScript googleMapsApiKey={process.env.EXPO_PUBLIC_GEMINI_API_KEY}>
+        <WebGoogleMap
+          mapContainerStyle={{ width: '100%', height: '100%' }}
+          center={{ lat: coordinates.latitude, lng: coordinates.longitude }}
+          zoom={15}
+          options={{
+            disableDefaultUI: true,
+            zoomControl: false,
+            keyboardShortcuts: false,
+          }}
+        >
+          <WebMarker position={{ lat: coordinates.latitude, lng: coordinates.longitude }} />
+        </WebGoogleMap>
+      </WebLoadScript>
+    </View>
+  );
+}
+
 function formatWhen(dateIso?: string | null): string {
   if (!dateIso) return "";
   const d = new Date(dateIso);
@@ -46,7 +83,7 @@ type ActionType = "calendar" | "share" | "plan" | "note" | "reminder";
 
 function getPrimaryAction(category: string): { type: ActionType; label: string; icon: typeof Calendar } {
   const cat = category.toLowerCase();
-  
+
   if (cat === "events" || cat.includes("event")) {
     return { type: "calendar", label: "Add to calendar", icon: Calendar };
   }
@@ -65,7 +102,7 @@ function getPrimaryAction(category: string): { type: ActionType; label: string; 
   if (cat.includes("idea") || cat.includes("inspiration")) {
     return { type: "note", label: "Add note", icon: Lightbulb };
   }
-  
+
   return { type: "note", label: "Add note", icon: FileText };
 }
 
@@ -85,7 +122,7 @@ export default function ModalScreen() {
 
   const handlePrimaryAction = useCallback(async () => {
     if (!item || !primaryAction) return;
-    
+
     switch (primaryAction.type) {
       case "calendar":
         Alert.alert("Add to Calendar", "This would open your calendar to create an event.");
@@ -187,29 +224,33 @@ export default function ModalScreen() {
           </View>
 
           {item.coordinates ? (
-            <View style={styles.mapPreview} testID="itemModalMap">
-              <MapView
-                style={styles.map}
-                initialRegion={{
-                  latitude: item.coordinates.latitude,
-                  longitude: item.coordinates.longitude,
-                  latitudeDelta: 0.008,
-                  longitudeDelta: 0.008,
-                }}
-                scrollEnabled={false}
-                zoomEnabled={false}
-                pitchEnabled={false}
-                rotateEnabled={false}
-                pointerEvents="none"
-              >
-                <Marker
-                  coordinate={{
+            Platform.OS === "web" ? (
+              <WebMapPreview coordinates={item.coordinates} />
+            ) : (
+              <View style={styles.mapPreview} testID="itemModalMap">
+                <MapView
+                  style={styles.map}
+                  initialRegion={{
                     latitude: item.coordinates.latitude,
                     longitude: item.coordinates.longitude,
+                    latitudeDelta: 0.008,
+                    longitudeDelta: 0.008,
                   }}
-                />
-              </MapView>
-            </View>
+                  scrollEnabled={false}
+                  zoomEnabled={false}
+                  pitchEnabled={false}
+                  rotateEnabled={false}
+                  pointerEvents="none"
+                >
+                  <Marker
+                    coordinate={{
+                      latitude: item.coordinates.latitude,
+                      longitude: item.coordinates.longitude,
+                    }}
+                  />
+                </MapView>
+              </View>
+            )
           ) : null}
 
           <View style={styles.actions}>
