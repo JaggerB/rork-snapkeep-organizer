@@ -6,7 +6,8 @@
     "start": "npx rork start -p hj2k05iwj1eyva7ojqzc3 --tunnel",
     "start-web": "npx rork start -p hj2k05iwj1eyva7ojqzc3 --web --tunnel",
     "start-web-dev": "DEBUG=expo* npx rork start -p hj2k05iwj1eyva7ojqzc3 --web --tunnel",
-    "build:web": "npx expo export --platform web",
+    "build:web": "npm run prebuild && npx expo export --platform web",
+    "prebuild": "node -e \"console.log('BUILD-TIME REACT VERSION:', require('react/package.json').version)\"",
     "lint": "expo lint"
   },
   "dependencies": {
