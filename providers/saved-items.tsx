@@ -47,28 +47,37 @@ export function createId(): string {
   return `it_${Date.now().toString(16)}_${random}`;
 }
 
-async function uploadImageToStorage(localUri: string, itemId: string): Promise<string | null> {
+async function uploadImageToStorage(localUri: string, itemId: string, userId: string): Promise<string | null> {
   try {
-    console.log('[SavedItems] Uploading image to Supabase Storage:', localUri);
+    console.log('[SavedItems] Uploading image to Supabase Storage:', { localUri: localUri.substring(0, 50), itemId, userId });
 
-    // Read the file as base64
-    const base64 = await FileSystem.readAsStringAsync(localUri, {
-      encoding: 'base64',
-    });
+    let blob: Blob;
+    let contentType = 'image/jpeg';
+    const ext = localUri.split('.').pop()?.split('?')[0] || 'jpg';
 
-    // Determine file extension
-    const ext = localUri.split('.').pop() || 'jpg';
+    if (localUri.startsWith('data:')) {
+      // Handle base64 data URL
+      const response = await fetch(localUri);
+      blob = await response.blob();
+      const match = localUri.match(/^data:(image\/[a-z]+);base64,/);
+      if (match) contentType = match[1];
+    } else {
+      // Handle file:// or blob: URLs
+      const response = await fetch(localUri);
+      blob = await response.blob();
+      contentType = blob.type || `image/${ext}`;
+    }
+
     const fileName = `${itemId}.${ext}`;
-    const filePath = `${fileName}`;
+    const filePath = `${userId}/${fileName}`;
 
-    // Convert base64 to blob
-    const blob = await (await fetch(`data:image/${ext};base64,${base64}`)).blob();
+    console.log('[SavedItems] Storage path:', filePath, 'Size:', blob.size, 'Type:', contentType);
 
     // Upload to Supabase Storage
     const { data, error } = await supabase.storage
       .from('screenshots')
       .upload(filePath, blob, {
-        contentType: `image/${ext}`,
+        contentType,
         upsert: true,
       });
 
@@ -164,12 +173,16 @@ export const [SavedItemsProvider, useSavedItems] = createContextHook(() => {
       console.log('[SavedItems] Migrating', localItems.length, 'local items to Supabase...');
 
       for (const item of localItems) {
-        // Upload image if it's a local file URI
+        // Upload image if it's not already a remote URL
         let imageUri = item.imageUri;
-        if (imageUri && imageUri.startsWith('file://')) {
-          const uploadedUrl = await uploadImageToStorage(imageUri, item.id);
+        if (imageUri && !imageUri.startsWith('http')) {
+          const uploadedUrl = await uploadImageToStorage(imageUri, item.id, user.id);
           if (uploadedUrl) {
             imageUri = uploadedUrl;
+          } else {
+            // If upload fails during migration, we skip imageUri or handle it
+            console.warn('[SavedItems] Migration: image upload failed for', item.id, 'Saving without image.');
+            imageUri = null;
           }
         }
 
@@ -245,12 +258,15 @@ export const [SavedItemsProvider, useSavedItems] = createContextHook(() => {
       setItems((prev) => [item, ...prev]);
 
       if (user) {
-        // Upload image to Supabase Storage
+        // Upload image to Supabase Storage if it's not already a remote URL
         let imageUri = item.imageUri;
-        if (imageUri && imageUri.startsWith('file://')) {
-          const uploadedUrl = await uploadImageToStorage(imageUri, item.id);
+        if (imageUri && !imageUri.startsWith('http')) {
+          const uploadedUrl = await uploadImageToStorage(imageUri, item.id, user.id);
           if (uploadedUrl) {
             imageUri = uploadedUrl;
+          } else {
+            console.warn('[SavedItems] Image upload failed during addItem. Saving item without image.');
+            imageUri = null;
           }
         }
 
