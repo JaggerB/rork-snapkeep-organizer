@@ -3,11 +3,11 @@
   "main": "expo-router/entry",
   "version": "1.0.1",
   "scripts": {
-    "start": "npx rork start -p hj2k05iwj1eyva7ojqzc3 --tunnel",
-    "start-web": "npx rork start -p hj2k05iwj1eyva7ojqzc3 --web --tunnel",
-    "start-web-dev": "DEBUG=expo* npx rork start -p hj2k05iwj1eyva7ojqzc3 --web --tunnel",
-    "build:web": "npm run prebuild && npx expo export --platform web",
-    "prebuild": "node -e \"console.log('BUILD-TIME REACT VERSION:', require('react/package.json').version)\"",
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "build:web": "expo export --platform web",
     "lint": "expo lint"
   },
   "dependencies": {
@@ -16,7 +16,6 @@
     "@nkzw/create-context-hook": "^1.1.0",
     "@react-google-maps/api": "^2.20.8",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "@rork-ai/toolkit-sdk": "^0.2.51",
     "@stardazed/streams-text-encoding": "^1.0.2",
     "@supabase/supabase-js": "^2.93.3",
     "@tanstack/react-query": "^5.83.0",

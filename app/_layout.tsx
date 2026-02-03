@@ -1,5 +1,6 @@
 import { AuthProvider, useAuth } from "@/providers/auth";
 import { SavedItemsProvider } from "@/providers/saved-items";
+import { TripsProvider } from "@/providers/trips";
 import Colors from "@/constants/colors";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
@@ -97,14 +98,16 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <SavedItemsProvider>
-          <View style={styles.container}>
-            <ErrorBoundary>
-              <RootLayoutNav />
-              <StatusBar style="dark" />
-            </ErrorBoundary>
-          </View>
-        </SavedItemsProvider>
+        <TripsProvider>
+          <SavedItemsProvider>
+            <View style={styles.container}>
+              <ErrorBoundary>
+                <RootLayoutNav />
+                <StatusBar style="dark" />
+              </ErrorBoundary>
+            </View>
+          </SavedItemsProvider>
+        </TripsProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

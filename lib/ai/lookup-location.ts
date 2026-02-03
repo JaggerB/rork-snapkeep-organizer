@@ -69,28 +69,7 @@ export type LocationLookupResult = {
   mapsUrl: string | null;
 };
 
-const LocationSchema = z.object({
-  latitude: z
-    .number()
-    .describe("Latitude coordinate of the location")
-    .nullable(),
-  longitude: z
-    .number()
-    .describe("Longitude coordinate of the location")
-    .nullable(),
-  formattedAddress: z
-    .string()
-    .describe("Full formatted address of the location")
-    .nullable(),
-  city: z
-    .string()
-    .describe("City name if identifiable")
-    .nullable(),
-  country: z
-    .string()
-    .describe("Country name if identifiable")
-    .nullable(),
-});
+// Reserved for future validation of location lookups using zod if needed.
 
 export async function lookupLocationCoordinates(params: {
   locationName: string;
@@ -153,13 +132,6 @@ export async function lookupLocationCoordinates(params: {
 
   // 3. Fallback: Return NULL as requested. No "best guesses".
   console.warn("[lookupLocationCoordinates] Places API failed to return coords. Returning null.");
-  return {
-    latitude: null,
-    longitude: null,
-    formattedAddress: null,
-    mapsUrl: null,
-  };
-
   return {
     latitude: null,
     longitude: null,

@@ -1,11 +1,13 @@
 import Colors from "@/constants/colors";
 import { useAuth } from "@/providers/auth";
 import { useSavedItems, SavedItem } from "@/providers/saved-items";
+import { useTrips } from "@/providers/trips";
 import { Image } from "expo-image";
 import { router, Stack } from "expo-router";
 import {
   Bookmark,
   Calendar,
+  FolderPlus,
   LogOut,
   MapPin,
   Plus,
@@ -513,6 +515,75 @@ function DoMapView({ items }: { items: SavedItem[] }) {
 }
 
 
+function TripCard({ trip }: { trip: any }) {
+  const handlePress = useCallback(() => {
+    router.push({ pathname: "/trip/[id]", params: { id: trip.id } });
+  }, [trip.id]);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.tripCard, pressed && styles.cardPressed]}
+      onPress={handlePress}
+    >
+      <View style={styles.tripCardContent}>
+        <Text style={styles.tripCardTitle}>{trip.name}</Text>
+        {trip.startDate && (
+          <Text style={styles.tripCardDate}>
+            {new Date(trip.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+          </Text>
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
+function TripsSection({ trips }: { trips: any[] }) {
+  const upcomingTrips = useMemo(() => {
+    const now = new Date();
+    return trips
+      .filter(t => {
+        if (!t.startDate) return false;
+        return new Date(t.startDate) >= now;
+      })
+      .sort((a, b) => {
+        if (!a.startDate || !b.startDate) return 0;
+        return new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
+      })
+      .slice(0, 3); // Show max 3 upcoming trips
+  }, [trips]);
+
+  // Always show the section with at least the create button
+  return (
+    <View style={styles.tripsSection}>
+      <View style={styles.tripsSectionHeader}>
+        <Text style={styles.tripsSectionTitle}>Upcoming Trips</Text>
+        <Pressable
+          onPress={() => router.push("/create-trip")}
+          style={({ pressed }) => [styles.newTripButton, pressed && styles.newTripButtonPressed]}
+          hitSlop={8}
+        >
+          <Plus size={16} color={Colors.light.tint} />
+        </Pressable>
+      </View>
+      {upcomingTrips.length > 0 ? (
+        <View style={styles.tripsList}>
+          {upcomingTrips.map((trip) => (
+            <TripCard key={trip.id} trip={trip} />
+          ))}
+        </View>
+      ) : (
+        <Pressable
+          onPress={() => router.push("/create-trip")}
+          style={({ pressed }) => [styles.emptyTripsCard, pressed && styles.cardPressed]}
+        >
+          <FolderPlus size={20} color={Colors.light.mutedText} />
+          <Text style={styles.emptyTripsText}>Create your first trip to organize your saves</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 function DoSection({
   items,
   filter,
@@ -613,6 +684,7 @@ function DoSection({
 
 export default function LibraryScreen() {
   const { items, isLoading } = useSavedItems();
+  const { trips, isLoading: tripsLoading } = useTrips();
   const { user, signOut } = useAuth();
   const [doFilter, setDoFilter] = useState<DoFilter>("All");
   const insets = useSafeAreaInsets();
@@ -655,7 +727,7 @@ export default function LibraryScreen() {
           </View>
         </View>
 
-
+        <TripsSection trips={trips} />
 
         {isLoading ? (
           <View style={styles.emptyState}>
@@ -1040,5 +1112,71 @@ const styles = StyleSheet.create({
   },
   emojiText: {
     fontSize: 18,
+  },
+  tripsSection: {
+    paddingHorizontal: 24,
+    marginBottom: 24,
+  },
+  tripsSectionHeader: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    marginBottom: 12,
+  },
+  tripsSectionTitle: {
+    fontSize: 18,
+    fontWeight: "600" as const,
+    color: Colors.light.text,
+    letterSpacing: -0.3,
+  },
+  newTripButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(28, 93, 153, 0.08)",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  newTripButtonPressed: {
+    backgroundColor: "rgba(28, 93, 153, 0.15)",
+  },
+  tripsList: {
+    gap: 10,
+  },
+  tripCard: {
+    backgroundColor: Colors.light.card,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.light.border,
+  },
+  tripCardContent: {
+    gap: 4,
+  },
+  tripCardTitle: {
+    fontSize: 16,
+    fontWeight: "600" as const,
+    color: Colors.light.text,
+    letterSpacing: -0.2,
+  },
+  tripCardDate: {
+    fontSize: 13,
+    color: Colors.light.mutedText,
+  },
+  emptyTripsCard: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: "dashed" as const,
+    borderColor: Colors.light.border,
+    backgroundColor: "rgba(11, 18, 32, 0.02)",
+  },
+  emptyTripsText: {
+    fontSize: 14,
+    color: Colors.light.mutedText,
+    flex: 1,
   },
 });

@@ -1,19 +1,23 @@
 import { extractDetailsFromScreenshot } from "@/lib/ai/extract-screenshot";
 import { lookupLocationCoordinates, generateGoogleMapsUrl } from "@/lib/ai/lookup-location";
 import { createId, SavedItem, useSavedItems, Coordinates } from "@/providers/saved-items";
+import { useTrips, Trip } from "@/providers/trips";
+import Colors from "@/constants/colors";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { router, Stack, useFocusEffect } from "expo-router";
-import { ImagePlus, X } from "lucide-react-native";
+import { ImagePlus, X, FolderPlus, Check } from "lucide-react-native";
 import { useCallback, useState, useEffect, useRef } from "react";
 import {
   Alert,
   Animated,
   Dimensions,
   Easing,
+  Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -30,6 +34,7 @@ type Draft = {
   category: string;
   source: string;
   notes: string;
+  tripId?: string | null;
 };
 
 function normalizeCategory(input: string): string {
@@ -116,7 +121,9 @@ function LoadingDots() {
 
 export default function CollectScreen() {
   const { addItem } = useSavedItems();
+  const { trips } = useTrips();
   const [isExtracting, setIsExtracting] = useState(false);
+  const [showTripSelector, setShowTripSelector] = useState(false);
 
   const [draft, setDraft] = useState<Draft>({
     imageUri: null,
@@ -129,6 +136,7 @@ export default function CollectScreen() {
     category: "",
     source: "",
     notes: "",
+    tripId: null,
   });
 
   const hasImage = !!draft.imageUri;
@@ -146,8 +154,10 @@ export default function CollectScreen() {
         category: "",
         source: "",
         notes: "",
+        tripId: null,
       });
       setIsExtracting(false);
+      setShowTripSelector(false);
     }, [])
   );
 
@@ -163,7 +173,9 @@ export default function CollectScreen() {
       category: "",
       source: "",
       notes: "",
+      tripId: null,
     });
+    setShowTripSelector(false);
   }, []);
 
   const saveItem = useCallback(async (extractedDraft: Draft) => {
@@ -176,10 +188,12 @@ export default function CollectScreen() {
       return;
     }
 
+    // Prioritize imageDataUrl (base64) for uploading, fall back to imageUri
     const imageToSave = extractedDraft.imageDataUrl || extractedDraft.imageUri;
-    console.log("[CollectScreen] imageToSave type:", imageToSave?.substring(0, 30));
+    console.log("[CollectScreen] imageToSave type:", imageToSave?.substring(0, 50));
     console.log("[CollectScreen] imageDataUrl exists:", !!extractedDraft.imageDataUrl);
     console.log("[CollectScreen] imageUri exists:", !!extractedDraft.imageUri);
+    console.log("[CollectScreen] imageToSave length:", imageToSave?.length);
 
     const item: SavedItem = {
       id: createId(),
@@ -193,6 +207,7 @@ export default function CollectScreen() {
       source: extractedDraft.source.trim() || null,
       imageUri: imageToSave,
       notes: extractedDraft.notes.trim() || null,
+      tripId: extractedDraft.tripId || null,
     };
 
     console.log("[CollectScreen] saving item with imageUri length:", item.imageUri?.length);
@@ -298,7 +313,7 @@ export default function CollectScreen() {
         }
         
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        
+
         const finalDraft: Draft = {
           imageUri: asset.uri,
           imageDataUrl: dataUrl,
@@ -310,12 +325,18 @@ export default function CollectScreen() {
           category: data.category ?? "",
           source: data.source ?? "",
           notes: data.notes ?? "",
+          tripId: null,
         };
-        
+
         setDraft(finalDraft);
         setIsExtracting(false);
-        
-        await saveItem(finalDraft);
+
+        // Show trip selector if there are any trips, otherwise save directly
+        if (trips.length > 0) {
+          setShowTripSelector(true);
+        } else {
+          await saveItem(finalDraft);
+        }
       } catch (err) {
         console.error("[CollectScreen] extract error", err);
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -324,7 +345,19 @@ export default function CollectScreen() {
         clear();
       }
     }
-  }, [saveItem, clear]);
+  }, [saveItem, clear, trips.length]);
+
+  const handleSelectTrip = useCallback(async (tripId: string | null) => {
+    const updatedDraft = { ...draft, tripId };
+    setDraft(updatedDraft);
+    setShowTripSelector(false);
+    await saveItem(updatedDraft);
+  }, [draft, saveItem]);
+
+  const handleSkipTrip = useCallback(async () => {
+    setShowTripSelector(false);
+    await saveItem(draft);
+  }, [draft, saveItem]);
 
   return (
     <View style={styles.root} testID="collectScreen">
@@ -364,6 +397,82 @@ export default function CollectScreen() {
           </View>
         )}
       </View>
+
+      <Modal
+        visible={showTripSelector}
+        animationType="slide"
+        transparent
+        onRequestClose={handleSkipTrip}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add to Trip?</Text>
+              <Pressable onPress={handleSkipTrip} hitSlop={8}>
+                <X size={20} color={Colors.light.mutedText} />
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.tripList} showsVerticalScrollIndicator={false}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.tripOption,
+                  pressed && styles.tripOptionPressed,
+                  draft.tripId === null && styles.tripOptionSelected,
+                ]}
+                onPress={handleSkipTrip}
+              >
+                <View style={styles.tripOptionContent}>
+                  <Text style={styles.tripOptionName}>No Trip</Text>
+                  <Text style={styles.tripOptionDesc}>Save without assigning to a trip</Text>
+                </View>
+                {draft.tripId === null && (
+                  <Check size={20} color={Colors.light.tint} />
+                )}
+              </Pressable>
+
+              {trips.map((trip) => (
+                <Pressable
+                  key={trip.id}
+                  style={({ pressed }) => [
+                    styles.tripOption,
+                    pressed && styles.tripOptionPressed,
+                    draft.tripId === trip.id && styles.tripOptionSelected,
+                  ]}
+                  onPress={() => handleSelectTrip(trip.id)}
+                >
+                  <View style={styles.tripOptionContent}>
+                    <Text style={styles.tripOptionName}>{trip.name}</Text>
+                    {trip.startDate && (
+                      <Text style={styles.tripOptionDate}>
+                        {new Date(trip.startDate).toLocaleDateString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric'
+                        })}
+                      </Text>
+                    )}
+                  </View>
+                  {draft.tripId === trip.id && (
+                    <Check size={20} color={Colors.light.tint} />
+                  )}
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <Pressable
+              onPress={() => router.push("/create-trip")}
+              style={({ pressed }) => [
+                styles.createTripButton,
+                pressed && styles.createTripButtonPressed,
+              ]}
+            >
+              <FolderPlus size={18} color={Colors.light.tint} />
+              <Text style={styles.createTripButtonText}>Create New Trip</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -458,5 +567,90 @@ const styles = StyleSheet.create({
     fontWeight: "500" as const,
     color: "#666",
     letterSpacing: 0.3,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end" as const,
+  },
+  modalContent: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 24,
+    paddingBottom: Platform.OS === "ios" ? 40 : 24,
+    maxHeight: "80%",
+  },
+  modalHeader: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    paddingHorizontal: 24,
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "700" as const,
+    color: Colors.light.text,
+    letterSpacing: -0.4,
+  },
+  tripList: {
+    maxHeight: 320,
+    paddingHorizontal: 24,
+  },
+  tripOption: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: Colors.light.card,
+    borderWidth: 1,
+    borderColor: Colors.light.border,
+    marginBottom: 10,
+  },
+  tripOptionPressed: {
+    backgroundColor: "rgba(0, 0, 0, 0.02)",
+  },
+  tripOptionSelected: {
+    borderColor: Colors.light.tint,
+    backgroundColor: "rgba(28, 93, 153, 0.04)",
+  },
+  tripOptionContent: {
+    flex: 1,
+    gap: 4,
+  },
+  tripOptionName: {
+    fontSize: 16,
+    fontWeight: "600" as const,
+    color: Colors.light.text,
+    letterSpacing: -0.2,
+  },
+  tripOptionDesc: {
+    fontSize: 13,
+    color: Colors.light.mutedText,
+  },
+  tripOptionDate: {
+    fontSize: 13,
+    color: Colors.light.mutedText,
+  },
+  createTripButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+    marginTop: 16,
+    marginHorizontal: 24,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "rgba(28, 93, 153, 0.08)",
+  },
+  createTripButtonPressed: {
+    backgroundColor: "rgba(28, 93, 153, 0.15)",
+  },
+  createTripButtonText: {
+    fontSize: 15,
+    fontWeight: "600" as const,
+    color: Colors.light.tint,
   },
 });
