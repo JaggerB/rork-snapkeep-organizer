@@ -113,11 +113,13 @@ export default function TripDetailScreen() {
                 }
               >
                 <View style={styles.itemThumb}>
-                  {item.imageUri ? (
+                  {item.imageUri && !item.imageUri.startsWith("data:image") ? (
                     <Image
                       source={{ uri: item.imageUri }}
                       style={styles.itemImage}
                       contentFit="cover"
+                      cachePolicy="disk"
+                      recyclingKey={item.id}
                     />
                   ) : (
                     <View style={styles.itemPlaceholder}>
@@ -161,31 +163,35 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.background,
   },
   header: {
-    paddingHorizontal: 24,
-    paddingBottom: 20,
-    gap: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.light.border,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    gap: 20,
+    backgroundColor: Colors.light.surface,
   },
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(11, 18, 32, 0.05)",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.light.card,
     alignItems: "center" as const,
     justifyContent: "center" as const,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
   },
   backButtonPressed: {
-    backgroundColor: "rgba(11, 18, 32, 0.1)",
+    opacity: 0.8,
+    transform: [{ scale: 0.95 }],
   },
   headerInfo: {
-    gap: 6,
+    gap: 8,
   },
   tripName: {
-    fontSize: 28,
+    fontSize: 34,
     fontWeight: "700" as const,
     color: Colors.light.text,
-    letterSpacing: -0.6,
+    letterSpacing: -0.8,
   },
   tripDescription: {
     fontSize: 15,
@@ -238,21 +244,30 @@ const styles = StyleSheet.create({
     flexDirection: "row" as const,
     alignItems: "center" as const,
     paddingVertical: 12,
-    paddingHorizontal: 24,
-    gap: 12,
+    paddingHorizontal: 20,
+    gap: 16,
+    marginHorizontal: 20,
+    marginBottom: 8,
+    backgroundColor: Colors.light.card,
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
   },
   itemCardPressed: {
-    backgroundColor: "rgba(0,0,0,0.02)",
+    opacity: 0.8,
+    transform: [{ scale: 0.98 }],
   },
   itemThumb: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
-    backgroundColor: "#F0F0EE",
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: Colors.light.surface,
     overflow: "hidden" as const,
     shadowColor: "#000",
     shadowOpacity: 0.06,
-    shadowRadius: 4,
+    shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },

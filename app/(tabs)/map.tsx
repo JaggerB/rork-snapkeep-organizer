@@ -14,14 +14,55 @@ import {
   Text,
   View,
 } from "react-native";
-import MapView, { Marker, Region } from "react-native-maps";
+// Lazy require so web builds never touch react-native-maps
+let NativeMapView: any = null;
+let NativeMarker: any = null;
+if (Platform.OS !== "web") {
+  try {
+    const RNMaps = require("react-native-maps");
+    NativeMapView = RNMaps.default;
+    NativeMarker = RNMaps.Marker;
+  } catch (e) {
+    console.warn("[MapScreen] Failed to load react-native-maps", e);
+  }
+}
 
-const DEFAULT_REGION: Region = {
+const DEFAULT_REGION = {
   latitude: -37.8136,
   longitude: 144.9631,
   latitudeDelta: 0.5,
   longitudeDelta: 0.5,
 };
+
+function getCategoryEmoji(category?: string | null, title?: string | null): string {
+  const combined = `${category || ""} ${title || ""}`.toLowerCase();
+  if (combined.includes("coffee") || combined.includes("cafe") || combined.includes("café")) return "☕";
+  if (combined.includes("bakery") || combined.includes("bakeries") || combined.includes("boulangerie")) return "🥐";
+  const c = (category || "").toLowerCase();
+  if (c === "restaurant" || c === "food") return "🍽️";
+  if (c === "bar") return "🍸";
+  if (c.includes("pizza")) return "🍕";
+  if (c.includes("burger")) return "🍔";
+  if (c.includes("sushi")) return "🍣";
+  if (c === "event" || c.includes("events")) return "🎫";
+  if (c === "nightlife") return "🎉";
+  if (c.includes("concert")) return "🎵";
+  if (c.includes("festival")) return "🎪";
+  if (c.includes("sport") || c.includes("race") || c.includes("f1")) return "🏎️";
+  if (c === "museum") return "🏛️";
+  if (c === "attraction" || c.includes("date night")) return "🗽";
+  if (c.includes("art") || c.includes("gallery")) return "🎨";
+  if (c === "hike" || c.includes("hikes")) return "🥾";
+  if (c === "beach") return "🏖️";
+  if (c === "park") return "🌳";
+  if (c.includes("nature")) return "🌲";
+  if (c === "hotel") return "🏨";
+  if (c.includes("travel")) return "✈️";
+  if (c === "shop" || c.includes("shopping")) return "🛍️";
+  if (c === "wellness") return "💆";
+  if (c === "activity") return "🎯";
+  return "📍";
+}
 
 function ItemCard({
   item,
@@ -43,8 +84,8 @@ function ItemCard({
         onPress={() => router.push({ pathname: "/modal", params: { id: item.id } })}
         testID={`mapCard_${item.id}`}
       >
-        {item.imageUri ? (
-          <Image source={{ uri: item.imageUri }} style={styles.cardImage} contentFit="cover" />
+        {item.imageUri && !item.imageUri.startsWith("data:image") ? (
+          <Image source={{ uri: item.imageUri }} style={styles.cardImage} contentFit="cover" cachePolicy="disk" recyclingKey={item.id} />
         ) : (
           <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
             <MapPin size={24} color="rgba(11, 18, 32, 0.2)" />
@@ -79,7 +120,7 @@ function ItemCard({
 
 export default function MapScreen() {
   const { items } = useSavedItems();
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<any>(null);
   const [selectedItem, setSelectedItem] = useState<SavedItem | null>(null);
 
   const itemsWithLocation = useMemo(
@@ -169,8 +210,8 @@ export default function MapScreen() {
               onPress={() => router.push({ pathname: "/modal", params: { id: item.id } })}
               testID={`webListItem_${item.id}`}
             >
-              {item.imageUri ? (
-                <Image source={{ uri: item.imageUri }} style={styles.webListImage} contentFit="cover" />
+              {item.imageUri && !item.imageUri.startsWith("data:image") ? (
+                <Image source={{ uri: item.imageUri }} style={styles.webListImage} contentFit="cover" cachePolicy="disk" recyclingKey={item.id} />
               ) : (
                 <View style={[styles.webListImage, styles.webListImagePlaceholder]}>
                   <MapPin size={20} color="rgba(11, 18, 32, 0.2)" />
@@ -199,9 +240,9 @@ export default function MapScreen() {
             </Pressable>
           ))}
         </ScrollView>
-      ) : (
+      ) : NativeMapView ? (
         <View style={styles.mapWrapper}>
-          <MapView
+          <NativeMapView
             ref={mapRef}
             style={styles.map}
             initialRegion={initialRegion}
@@ -210,20 +251,27 @@ export default function MapScreen() {
             testID="mapView"
           >
             {itemsWithLocation.map((item) => (
-              <Marker
+              <NativeMarker
                 key={item.id}
                 coordinate={{
                   latitude: item.coordinates!.latitude,
                   longitude: item.coordinates!.longitude,
                 }}
-                title={item.title}
-                description={item.location ?? undefined}
                 onPress={() => handleMarkerPress(item)}
-                pinColor={selectedItem?.id === item.id ? Colors.light.accent : Colors.light.tint}
+                tracksViewChanges={false}
                 testID={`marker_${item.id}`}
-              />
+              >
+                <View
+                  style={[
+                    styles.marker,
+                    selectedItem?.id === item.id && styles.markerSelected,
+                  ]}
+                >
+                  <Text style={styles.markerEmoji}>{getCategoryEmoji(item.category, item.title)}</Text>
+                </View>
+              </NativeMarker>
             ))}
-          </MapView>
+          </NativeMapView>
 
           {selectedItem && (
             <View style={styles.cardContainer}>
@@ -234,6 +282,10 @@ export default function MapScreen() {
               />
             </View>
           )}
+        </View>
+      ) : (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>Map unavailable</Text>
         </View>
       )}
     </View>
@@ -268,6 +320,28 @@ const styles = StyleSheet.create({
   },
   map: {
     flex: 1,
+  },
+  marker: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    borderWidth: 2,
+    borderColor: "#fff",
+  },
+  markerSelected: {
+    borderColor: Colors.light.tint,
+    borderWidth: 3,
+    transform: [{ scale: 1.1 }],
+  },
+  markerEmoji: {
+    fontSize: 22,
   },
   emptyState: {
     flex: 1,

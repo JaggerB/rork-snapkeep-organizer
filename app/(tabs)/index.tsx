@@ -1,1182 +1,436 @@
 import Colors from "@/constants/colors";
 import { useAuth } from "@/providers/auth";
 import { useSavedItems, SavedItem } from "@/providers/saved-items";
-import { useTrips } from "@/providers/trips";
 import { Image } from "expo-image";
-import { router, Stack } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
+import { router, Stack, useFocusEffect } from "expo-router";
 import {
-  Bookmark,
-  Calendar,
-  FolderPlus,
-  LogOut,
   MapPin,
   Plus,
-  Map,
+  Trash2,
+  Settings,
+  Check,
 } from "lucide-react-native";
-import { useMemo, useState, useCallback, useEffect } from "react";
-import MapView, { Marker } from "react-native-maps";
+import { useMemo, useState, useCallback, useRef, useEffect, memo } from "react";
 import {
-  Linking,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
+  Animated,
+  Dimensions,
+  FlatList,
+  Alert,
+  PanResponder,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GestureHandlerRootView, Swipeable } from "react-native-gesture-handler";
 
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const SHEET_COLLAPSED = 64;
+const SHEET_HALF = SCREEN_HEIGHT * 0.4;
+const SHEET_FULL = SCREEN_HEIGHT * 0.7;
 
-
-
-type DoFilter = "All" | "This Week" | "Upcoming" | "Anytime" | "Map";
-
-
-function isDoItem(item: SavedItem): boolean {
-  const cat = (item.category || "").toLowerCase();
-  const title = (item.title || "").toLowerCase();
-  const notes = (item.notes || "").toLowerCase();
-  const source = (item.source || "").toLowerCase();
-  const combined = `${cat} ${title} ${notes} ${source}`;
-
-  // First, check if this is clearly a Think item - these should NEVER be in Do
-  const thinkExclusions = [
-    "domain", "url", "website", "godaddy", "namecheap", "hosting",
-    "shop", "shopping", "buy now", "purchase", "add to cart", "checkout",
-    "product", "price", "$", "sale", "discount", "deal", "off",
-    "course", "tutorial", "article", "blog", "read", "learn",
-    "movie", "film", "netflix", "streaming", "watch", "series", "episode",
-    "podcast", "listen", "spotify", "youtube",
-    "recipe", "diy", "how to", "tip", "hack",
-    "amazon", "etsy", "ebay", "shopify", "store",
-    "fashion", "clothing", "outfit", "shoes", "accessories",
-    "furniture", "decor", "gadget", "tech", "electronics",
-    "app", "software", "tool", "subscription"
-  ];
-
-  const isClearlyThink = thinkExclusions.some(kw => combined.includes(kw));
-  if (isClearlyThink) {
-    return false;
-  }
-
-  // Do keywords - things you physically go to or attend
-  const doKeywords = [
-    "event", "events", "travel", "trip", "date night",
-    "restaurant", "hike", "hikes", "hiking",
-    "exhibition", "exhibit", "concert", "festival",
-    "museum", "gallery", "theater", "theatre", "performance",
-    "reservation", "booking", "tickets", "ticket",
-    "bar", "cafe", "coffee shop", "brunch", "dinner", "lunch",
-    "experience", "tour", "activity", "adventure",
-    "visit", "venue", "location", "popup", "pop-up"
-  ];
-
-  const hasDoKeyword = doKeywords.some(kw => combined.includes(kw));
-
-  // Has a specific date/time = likely actionable
-  const hasDateTime = !!item.dateTimeISO;
-
-  // Category signals
-  const doCategories = ["events", "travel", "date night", "hikes", "food"];
-  const hasDoCat = doCategories.some(c => cat.includes(c));
-
-  return hasDoKeyword || hasDateTime || hasDoCat;
-}
-
-function isThinkItem(item: SavedItem): boolean {
-  const cat = (item.category || "").toLowerCase();
-  const title = (item.title || "").toLowerCase();
-  const notes = (item.notes || "").toLowerCase();
-  const source = (item.source || "").toLowerCase();
-  const combined = `${cat} ${title} ${notes} ${source}`;
-
-  const thinkKeywords = [
-    // Shopping / Buy
-    "shop", "shopping", "buy", "purchase", "product", "price",
-    "sale", "discount", "deal", "amazon", "etsy", "ebay",
-    "domain", "url", "website", "godaddy", "namecheap", "hosting",
-    "add to cart", "checkout", "order",
-    // Learning
-    "learn", "learning", "course", "tutorial", "article", "blog",
-    "education", "class", "lesson", "guide",
-    // Media
-    "movie", "movies", "film", "watch", "netflix", "streaming",
-    "series", "episode", "documentary",
-    "read", "reading", "book", "podcast", "listen", "spotify",
-    "youtube", "video",
-    // Tech / Products
-    "app", "tool", "software", "tech", "gadget", "electronics",
-    "subscription", "service",
-    // Ideas
-    "idea", "inspiration", "save for later", "remember", "bookmark",
-    "recipe", "diy", "how to", "tip", "hack",
-    // Fashion / Home
-    "fashion", "style", "outfit", "clothing", "shoes", "accessories",
-    "furniture", "decor", "home", "design", "interior"
-  ];
-
-  // Category signals
-  const thinkCategories = ["shopping", "movies", "other"];
-  const hasThinkCat = thinkCategories.some(c => cat.includes(c));
-
-  return thinkKeywords.some(kw => combined.includes(kw)) || hasThinkCat;
-}
-
-function getThinkTag(item: SavedItem): "Buy" | "Learn" {
-  const cat = (item.category || "").toLowerCase();
-  const title = (item.title || "").toLowerCase();
-  const notes = (item.notes || "").toLowerCase();
-  const source = (item.source || "").toLowerCase();
-  const combined = `${cat} ${title} ${notes} ${source}`;
-
-  const buyKeywords = [
-    "shop", "shopping", "buy", "purchase", "product",
-    "price", "sale", "discount", "deal", "$",
-    "domain", "url", "godaddy", "namecheap", "hosting",
-    "add to cart", "checkout", "order",
-    "fashion", "style", "outfit", "clothing", "shoes",
-    "furniture", "decor", "gadget", "tech", "electronics",
-    "amazon", "etsy", "ebay", "shopify",
-    "subscription", "service", "plan"
-  ];
-
-  if (buyKeywords.some(kw => combined.includes(kw))) return "Buy";
-  return "Learn";
-}
-
-function formatTimeContext(isoDate: string | null | undefined): string | null {
-  if (!isoDate) return null;
-  const date = new Date(isoDate);
-  const now = new Date();
-  const diffMs = date.getTime() - now.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-
-  if (diffMs < 0) return null;
-  if (diffHours <= 0) return "Happening now";
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Tomorrow";
-  if (diffDays < 7) return `In ${diffDays} days`;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-
-function isThisWeekItem(item: SavedItem): boolean {
-  if (!item.dateTimeISO) return false;
-  const date = new Date(item.dateTimeISO);
-  const now = new Date();
-  const diffMs = date.getTime() - now.getTime();
-  const diffDays = diffMs / (1000 * 60 * 60 * 24);
-  // Allow items from 2 hours ago up to 7 days in future
-  return diffDays >= -0.08 && diffDays <= 7;
-}
-
-function isUpcomingItem(item: SavedItem): boolean {
-  if (!item.dateTimeISO) return false;
-  const date = new Date(item.dateTimeISO);
-  const now = new Date();
-  const diffMs = date.getTime() - now.getTime();
-  const diffDays = diffMs / (1000 * 60 * 60 * 24);
-  return diffDays > 7;
-}
-
-function isAnytimeItem(item: SavedItem): boolean {
-  return !item.dateTimeISO;
-}
-
-function DoCard({ item }: { item: SavedItem }) {
-  const [imageError, setImageError] = useState(false);
-  const handlePress = useCallback(() => {
-    router.push({ pathname: "/modal", params: { id: item.id } });
-  }, [item.id]);
-
-  console.log("[DoCard] item:", item.id, "imageUri:", item.imageUri ? item.imageUri.substring(0, 50) + "..." : "null");
-
-  const timeContext = formatTimeContext(item.dateTimeISO);
-  const cat = (item.category || "").toLowerCase();
-  const isEvent = cat.includes("event") || cat.includes("date");
-  const hasLocation = !!item.coordinates || !!item.mapsUrl;
-
-  const handlePrimaryAction = useCallback(() => {
-    if (isEvent && item.dateTimeISO) {
-      const title = encodeURIComponent(item.title);
-      const startDate = new Date(item.dateTimeISO).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
-      const endDate = new Date(new Date(item.dateTimeISO).getTime() + 60 * 60 * 1000).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
-      const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startDate}/${endDate}`;
-      Linking.openURL(url);
-    } else if (hasLocation) {
-      if (item.mapsUrl) {
-        Linking.openURL(item.mapsUrl);
-      } else if (item.coordinates) {
-        const url = Platform.select({
-          ios: `maps:0,0?q=${item.coordinates.latitude},${item.coordinates.longitude}`,
-          android: `geo:${item.coordinates.latitude},${item.coordinates.longitude}`,
-          default: `https://www.google.com/maps?q=${item.coordinates.latitude},${item.coordinates.longitude}`,
-        });
-        Linking.openURL(url);
-      }
-    }
-  }, [item, isEvent, hasLocation]);
-
-  return (
-    <Pressable
-      style={({ pressed }) => [styles.doCard, pressed && styles.cardPressed]}
-      onPress={handlePress}
-      testID={`do_item_${item.id}`}
-    >
-      <View style={styles.doCardThumbContainer}>
-        <View style={styles.doCardThumb}>
-          {item.imageUri && !imageError ? (
-            <Image
-              source={{ uri: item.imageUri }}
-              style={styles.doCardImage}
-              contentFit="cover"
-              onError={(e) => {
-                console.log("[DoCard] image error for", item.id, e);
-                setImageError(true);
-              }}
-            />
-          ) : (
-            <View style={styles.doCardPlaceholder}>
-              <Bookmark size={14} color="rgba(11, 18, 32, 0.15)" />
-            </View>
-          )}
-        </View>
-      </View>
-      <View style={styles.doCardContent}>
-        <Text style={styles.doCardTitle}>{item.title}</Text>
-        <View style={styles.doCardMeta}>
-          {item.location && (
-            <Text numberOfLines={1} style={styles.doCardLocation}>{item.location}</Text>
-          )}
-          {timeContext && (
-            <Text style={styles.doCardTime}>{timeContext}</Text>
-          )}
-        </View>
-      </View>
-      {(isEvent || hasLocation) && (
-        <Pressable
-          style={({ pressed }) => [styles.doCardAction, pressed && styles.doCardActionPressed]}
-          onPress={handlePrimaryAction}
-          hitSlop={8}
-        >
-          {isEvent ? (
-            <Calendar size={16} color={Colors.light.tint} />
-          ) : (
-            <MapPin size={16} color={Colors.light.tint} />
-          )}
-        </Pressable>
-      )}
-    </Pressable>
-  );
-}
-
-
-
-
-
-// Dynamic import for Web Maps to avoid Native crashes
-let WebGoogleMap: any, WebLoadScript: any, WebMarker: any;
-if (Platform.OS === "web") {
+// Lazy require for native maps
+let NativeMapView: any = null;
+let NativeMarker: any = null;
+if (Platform.OS !== "web") {
   try {
-    const lib = require("@react-google-maps/api");
-    WebGoogleMap = lib.GoogleMap;
-    WebLoadScript = lib.LoadScript;
-    WebMarker = lib.Marker;
+    const RNMaps = require("react-native-maps");
+    NativeMapView = RNMaps.default;
+    NativeMarker = RNMaps.Marker;
   } catch (e) {
-    console.warn("Failed to load @react-google-maps/api", e);
+    console.warn("[MapScreen] Failed to load react-native-maps", e);
   }
 }
 
-const mapContainerStyle = {
-  width: '100%',
-  height: '100%',
-  borderRadius: '16px',
-};
-
-function WebMap({ items }: { items: SavedItem[] }) {
-  const locationItems = items.filter((it) => !!it.coordinates);
-  const [map, setMap] = useState<any>(null);
-
-  const onLoad = useCallback((mapInstance: any) => {
-    setMap(mapInstance);
-  }, []);
-
-  const center = useMemo(() => {
-    if (locationItems.length === 0) {
-      return { lat: -37.8136, lng: 144.9631 }; // Melbourne
-    }
-    const lats = locationItems.map(it => it.coordinates!.latitude);
-    const lngs = locationItems.map(it => it.coordinates!.longitude);
-    return {
-      lat: (Math.min(...lats) + Math.max(...lats)) / 2,
-      lng: (Math.min(...lngs) + Math.max(...lngs)) / 2,
-    };
-  }, [locationItems]);
-
-  // Adjust bounds when items or map changes
-  useEffect(() => {
-    if (map && locationItems.length > 0) {
-      const bounds = new window.google.maps.LatLngBounds();
-      locationItems.forEach(item => {
-        bounds.extend({ lat: item.coordinates!.latitude, lng: item.coordinates!.longitude });
-      });
-      map.fitBounds(bounds);
-
-      // If only one marker or very close, zoom might be too high. Adjust if needed.
-      // We use a listener for 'idle' to check zoom after bounds fit, 
-      // but simple fitBounds is usually enough. 
-      // For single items, fitBounds can zoom in MAX_ZOOM.
-      // Google Maps usually handles this but let's be safe.
-      if (locationItems.length === 1) {
-        // Force a reasonable zoom for single item if fitBounds goes too crazy
-        // Actually fitBounds with one point is effectively setCenter. 
-        // We can set a max zoom/listener, but let's try default fitBounds behavior first.
-        // Note: fitBounds with 1 point might yield max zoom. 
-        // Better:
-        map.setZoom(15);
-        map.setCenter({ lat: locationItems[0].coordinates!.latitude, lng: locationItems[0].coordinates!.longitude });
-      }
-    }
-  }, [map, locationItems]);
-
-
-  if (!process.env.EXPO_PUBLIC_GEMINI_API_KEY) {
-    return (
-      <View style={styles.webMapFallback}>
-        <Text style={styles.webMapFallbackTitle}>API Key Missing</Text>
-      </View>
-    );
-  }
-
-  // If libraries failed to load
-  if (!WebGoogleMap || !WebLoadScript) {
-    return (
-      <View style={styles.webMapFallback}>
-        <Text style={styles.webMapFallbackTitle}>Map Library Error</Text>
-        <Text>Could not load Google Maps library.</Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.mapViewContainer}>
-      <WebLoadScript googleMapsApiKey={process.env.EXPO_PUBLIC_GEMINI_API_KEY || ""}>
-        <WebGoogleMap
-          mapContainerStyle={mapContainerStyle}
-          center={center}
-          zoom={13}
-          onLoad={onLoad}
-          options={{
-            disableDefaultUI: false,
-            zoomControl: true,
-          }}
-        >
-          {locationItems.map(item => (
-            <WebMarker
-              key={item.id}
-              position={{
-                lat: item.coordinates!.latitude,
-                lng: item.coordinates!.longitude
-              }}
-              label={{
-                text: getCategoryEmoji(item.category),
-                fontSize: "24px",
-                className: "emoji-marker-label" // Optional if we had CSS
-              }}
-              title={item.title}
-              onClick={() => router.push({ pathname: "/modal", params: { id: item.id } })}
-            />
-          ))}
-        </WebGoogleMap>
-      </WebLoadScript>
-    </View>
-  );
-}
-
-// Helper for emoji mapping
-function getCategoryEmoji(category?: string | null): string {
+function getCategoryEmoji(category?: string | null, title?: string | null): string {
+  const combined = `${category || ""} ${title || ""}`.toLowerCase();
+  if (combined.includes("coffee") || combined.includes("cafe") || combined.includes("café")) return "☕";
+  if (combined.includes("bakery") || combined.includes("bakeries") || combined.includes("boulangerie")) return "🥐";
   const c = (category || "").toLowerCase();
-
-  // Specific food types
+  if (c === "restaurant" || c === "food") return "🍽️";
+  if (c === "bar") return "🍸";
   if (c.includes("pizza")) return "🍕";
   if (c.includes("burger")) return "🍔";
   if (c.includes("sushi")) return "🍣";
-  if (c.includes("bakery") || c.includes("bread") || c.includes("pastry")) return "🥐";
-  if (c.includes("ice cream")) return "🍦";
-
-  // General Food/Drink
-  if (c.includes("food") || c.includes("restaurant") || c.includes("dinner") || c.includes("lunch")) return "🍽️";
-  if (c.includes("bar") || c.includes("pub") || c.includes("alcohol")) return "🍺";
-  if (c.includes("wine")) return "🍷";
-  if (c.includes("cocktail")) return "🍸";
-  if (c.includes("coffee") || c.includes("cafe")) return "☕";
-
-  // Events/Activities
-  if (c.includes("event") || c.includes("concert") || c.includes("music")) return "🎫";
-  if (c.includes("art") || c.includes("museum") || c.includes("gallery")) return "🎨";
-  if (c.includes("movie") || c.includes("cinema") || c.includes("film")) return "🎬";
-
-  // Outdoors/Travel
-  if (c.includes("hike") || c.includes("hiking") || c.includes("nature") || c.includes("park")) return "🌲";
-  if (c.includes("beach")) return "🏖️";
-  if (c.includes("travel") || c.includes("hotel") || c.includes("stay")) return "✈️";
-
-  // Shopping
-  if (c.includes("shop") || c.includes("store") || c.includes("buy")) return "🛍️";
-
+  if (c === "event" || c.includes("events")) return "🎫";
+  if (c === "nightlife") return "🎉";
+  if (c.includes("concert")) return "🎵";
+  if (c.includes("festival")) return "🎪";
+  if (c.includes("sport") || c.includes("race") || c.includes("f1")) return "🏎️";
+  if (c === "museum") return "🏛️";
+  if (c === "attraction" || c.includes("date night")) return "🗽";
+  if (c.includes("art") || c.includes("gallery")) return "🎨";
+  if (c === "hike" || c.includes("hikes")) return "🥾";
+  if (c === "beach") return "🏖️";
+  if (c === "park") return "🌳";
+  if (c.includes("nature")) return "🌲";
+  if (c === "hotel") return "🏨";
+  if (c.includes("travel")) return "✈️";
+  if (c === "shop" || c.includes("shopping")) return "🛍️";
+  if (c === "wellness") return "💆";
+  if (c === "activity") return "🎯";
   return "📍";
 }
 
-function DoMapView({ items }: { items: SavedItem[] }) {
-  const locationItems = items.filter((it) => !!it.coordinates);
-  const insets = useSafeAreaInsets();
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
 
-  console.log("[DoMapView] Rendering. Platform:", Platform.OS);
-  console.log("[DoMapView] Total Items:", items.length);
-  console.log("[DoMapView] Location Items:", locationItems.length);
-  if (locationItems.length > 0) {
-    console.log("[DoMapView] First Item Category:", locationItems[0].category, "Emoji:", getCategoryEmoji(locationItems[0].category));
+interface UpcomingContext {
+  snippet: string;
+  itemId: string;
+}
+
+function generateCatchySnippet(item: SavedItem, diffDays: number, diffHours: number): string {
+  const title = item.title || "event";
+  const category = item.category?.toLowerCase() || "";
+  if (title.toLowerCase().includes("f1") || title.toLowerCase().includes("formula") || title.toLowerCase().includes("grand prix")) {
+    if (diffHours < 24) return "🏎️ Lights out soon!";
+    if (diffDays === 1) return "🏎️ Lights out tomorrow!";
+    if (diffDays < 7) return `🏎️ ${diffDays} days to lights out`;
+    return "🏎️ Race day approaching";
   }
+  if (category === "event" && (title.toLowerCase().includes("concert") || title.toLowerCase().includes("tour") || title.toLowerCase().includes("live"))) {
+    if (diffHours < 24) return "🎵 Showtime tonight!";
+    if (diffDays === 1) return "🎵 Showtime tomorrow!";
+    if (diffDays < 7) return `🎵 ${diffDays} days until showtime`;
+    return "🎵 Show coming up";
+  }
+  if (title.toLowerCase().includes("festival") || title.toLowerCase().includes("fest")) {
+    if (diffHours < 24) return "🎉 Festival kicks off today!";
+    if (diffDays === 1) return "🎉 Festival starts tomorrow!";
+    if (diffDays < 7) return `🎉 ${diffDays} days to festival`;
+    return "🎉 Festival on the horizon";
+  }
+  if (category === "event" && (title.toLowerCase().includes("match") || title.toLowerCase().includes("game") || title.toLowerCase().includes("cup"))) {
+    if (diffHours < 24) return "⚽ Game day!";
+    if (diffDays === 1) return "⚽ Game day tomorrow!";
+    if (diffDays < 7) return `⚽ ${diffDays} days to kick off`;
+    return "⚽ Match coming up";
+  }
+  if (diffHours < 24) return `✨ ${title.split(' ').slice(0, 3).join(' ')} today!`;
+  if (diffDays === 1) return `✨ ${title.split(' ').slice(0, 3).join(' ')} tomorrow`;
+  if (diffDays < 7) return `✨ ${diffDays} days until ${title.split(' ').slice(0, 2).join(' ')}`;
+  return `✨ ${title.split(' ').slice(0, 3).join(' ')} coming up`;
+}
 
-  const initialRegion = useMemo(() => {
-    // Default to Melbourne if no items
-    if (locationItems.length === 0) {
-      return {
-        latitude: -37.8136,
-        longitude: 144.9631,
-        latitudeDelta: 0.1,
-        longitudeDelta: 0.1,
-      };
-    }
-    const lats = locationItems.map((it) => it.coordinates!.latitude);
-    const lngs = locationItems.map((it) => it.coordinates!.longitude);
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs);
-    const maxLng = Math.max(...lngs);
+function getUpcomingContext(items: SavedItem[]): UpcomingContext | null {
+  const now = new Date();
+  const upcoming = items
+    .filter(item => item.dateTimeISO && new Date(item.dateTimeISO) > now)
+    .sort((a, b) => new Date(a.dateTimeISO!).getTime() - new Date(b.dateTimeISO!).getTime());
+  if (upcoming.length === 0) return null;
+  const next = upcoming[0];
+  const nextDate = new Date(next.dateTimeISO!);
+  const diffMs = nextDate.getTime() - now.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  return { snippet: generateCatchySnippet(next, diffDays, diffHours), itemId: next.id };
+}
 
-    // Add some padding
-    const latDelta = (maxLat - minLat) * 1.5;
-    const lngDelta = (maxLng - minLng) * 1.5;
+const PlaceItem = memo(function PlaceItem({ item, isSelected, onPress, onDelete }: { item: SavedItem; isSelected: boolean; onPress: () => void; onDelete: () => void }) {
+  const swipeableRef = useRef<Swipeable>(null);
+  const handleDelete = () => {
+    Alert.alert("Delete Place", `Are you sure you want to delete "${item.title}"?`, [
+      { text: "Cancel", style: "cancel", onPress: () => swipeableRef.current?.close() },
+      { text: "Delete", style: "destructive", onPress: onDelete },
+    ]);
+  };
+  return (
+    <Swipeable ref={swipeableRef} renderRightActions={() => (
+      <Pressable style={styles.swipeDeleteBtn} onPress={handleDelete}>
+        <Trash2 size={22} color="#fff" />
+        <Text style={styles.swipeDeleteText}>Delete</Text>
+      </Pressable>
+    )} overshootRight={false} rightThreshold={40} containerStyle={styles.swipeableContainer}>
+      <Pressable onPress={onPress} onLongPress={handleDelete} delayLongPress={500} style={({ pressed }) => [styles.placeItem, pressed && styles.placeItemPressed]}>
+        <View style={styles.placeThumbnailContainer}>
+          {item.imageUri && !item.imageUri.startsWith("data:image") ? (
+            <Image source={{ uri: item.imageUri }} style={styles.placeThumbnail} contentFit="cover" placeholder={{ blurhash: "L6PZfSi_.AyE_3t7t7R**0o#DgR4" }} transition={200} cachePolicy="disk" recyclingKey={item.id} />
+          ) : (
+            <View style={styles.placeThumbnailPlaceholder}>
+              <Text style={styles.placeEmoji}>{getCategoryEmoji(item.category, item.title)}</Text>
+            </View>
+          )}
+        </View>
+        <View style={styles.placeContent}>
+          <Text style={styles.placeTitle}>{item.title}</Text>
+          <Text style={styles.placeCategory}>
+            {item.category || "Saved"}
+            {item.dateTimeISO && !isNaN(new Date(item.dateTimeISO).getTime()) && ` · ${new Date(item.dateTimeISO).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+          </Text>
+        </View>
+        {isSelected && <View style={styles.checkBadge}><Check size={14} color="#fff" strokeWidth={3} /></View>}
+      </Pressable>
+    </Swipeable>
+  );
+});
 
-    return {
-      latitude: (minLat + maxLat) / 2,
-      longitude: (minLng + maxLng) / 2,
-      latitudeDelta: Math.max(0.05, latDelta),
-      longitudeDelta: Math.max(0.05, lngDelta),
-    };
-  }, [locationItems]);
+export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
+  const { items, isLoading, removeItem, refreshItems } = useSavedItems();
+  const { user } = useAuth();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<"all" | "thisWeek" | "upcoming">("all");
+  const sheetAnim = useRef(new Animated.Value(0.5)).current; // 0=collapsed, 0.5=half, 1=full
+  const sheetPositionRef = useRef(0.5);
+  const dragStartRef = useRef(0.5);
+  const [isSheetCollapsed, setIsSheetCollapsed] = useState(false);
+  const mapRef = useRef<any>(null);
+  const greeting = getGreeting();
+  const getFirstName = () => {
+    const fullName = user?.user_metadata?.full_name;
+    if (fullName) { const firstName = fullName.split(' ')[0]; return firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(); }
+    const email = user?.email;
+    if (email) { const emailName = email.split('@')[0].split('.')[0].split(/[0-9]/)[0]; return emailName.charAt(0).toUpperCase() + emailName.slice(1).toLowerCase(); }
+    return "there";
+  };
+  const userName = getFirstName();
+  const lastRefreshRef = useRef<number>(0);
+  useFocusEffect(useCallback(() => {
+    lastRefreshRef.current = Date.now();
+    refreshItems();
+  }, [refreshItems]));
+  const upcomingContext = useMemo(() => getUpcomingContext(items), [items]);
 
-  const handleMarkerPress = useCallback((item: SavedItem) => {
-    router.push({ pathname: "/modal", params: { id: item.id } });
+  const getCoords = useCallback((item: SavedItem): { latitude: number; longitude: number } | null => {
+    const c = item.coordinates;
+    if (!c || typeof c !== "object") return null;
+    const o = c as Record<string, unknown>;
+    const lat = Number(o.latitude ?? o.lat);
+    const lng = Number(o.longitude ?? o.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { latitude: lat, longitude: lng };
   }, []);
 
-  if (Platform.OS === "web") {
-    return <WebMap items={items} />;
-  }
-
-  return (
-    <View style={styles.mapViewContainer}>
-      <MapView
-        style={styles.mapView}
-        initialRegion={initialRegion}
-        showsUserLocation={true}
-        showsMyLocationButton={true}
-        provider={undefined} // Use default (Apple Maps on iOS, Google on Android)
-      >
-        {locationItems.map((item) => (
-          <Marker
-            key={item.id}
-            coordinate={{
-              latitude: item.coordinates!.latitude,
-              longitude: item.coordinates!.longitude,
-            }}
-            title={item.title}
-            description={item.location || undefined}
-            onCalloutPress={() => handleMarkerPress(item)}
-          >
-            <View style={styles.emojiMarker}>
-              <Text style={styles.emojiText}>{getCategoryEmoji(item.category)}</Text>
-            </View>
-          </Marker>
-        ))}
-      </MapView>
-      {locationItems.length === 0 && (
-        <View style={[styles.mapEmptyOverlay, { paddingBottom: insets.bottom + 20 }]}>
-          <View style={styles.mapEmptyCard}>
-            <MapPin size={20} color="rgba(11, 18, 32, 0.3)" />
-            <Text style={styles.mapEmptyText}>No places saved yet</Text>
-          </View>
-        </View>
-      )}
-    </View>
+  const locationItems = useMemo(
+    () => items.filter(item => getCoords(item) != null),
+    [items, getCoords]
   );
-}
-
-
-function TripCard({ trip }: { trip: any }) {
-  const handlePress = useCallback(() => {
-    router.push({ pathname: "/trip/[id]", params: { id: trip.id } });
-  }, [trip.id]);
-
-  return (
-    <Pressable
-      style={({ pressed }) => [styles.tripCard, pressed && styles.cardPressed]}
-      onPress={handlePress}
-    >
-      <View style={styles.tripCardContent}>
-        <Text style={styles.tripCardTitle}>{trip.name}</Text>
-        {trip.startDate && (
-          <Text style={styles.tripCardDate}>
-            {new Date(trip.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-          </Text>
-        )}
-      </View>
-    </Pressable>
-  );
-}
-
-function TripsSection({ trips }: { trips: any[] }) {
-  const upcomingTrips = useMemo(() => {
+  const categorizedItems = useMemo(() => {
     const now = new Date();
-    return trips
-      .filter(t => {
-        if (!t.startDate) return false;
-        return new Date(t.startDate) >= now;
-      })
-      .sort((a, b) => {
-        if (!a.startDate || !b.startDate) return 0;
-        return new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
-      })
-      .slice(0, 3); // Show max 3 upcoming trips
-  }, [trips]);
-
-  // Always show the section with at least the create button
-  return (
-    <View style={styles.tripsSection}>
-      <View style={styles.tripsSectionHeader}>
-        <Text style={styles.tripsSectionTitle}>Upcoming Trips</Text>
-        <Pressable
-          onPress={() => router.push("/create-trip")}
-          style={({ pressed }) => [styles.newTripButton, pressed && styles.newTripButtonPressed]}
-          hitSlop={8}
-        >
-          <Plus size={16} color={Colors.light.tint} />
-        </Pressable>
-      </View>
-      {upcomingTrips.length > 0 ? (
-        <View style={styles.tripsList}>
-          {upcomingTrips.map((trip) => (
-            <TripCard key={trip.id} trip={trip} />
-          ))}
-        </View>
-      ) : (
-        <Pressable
-          onPress={() => router.push("/create-trip")}
-          style={({ pressed }) => [styles.emptyTripsCard, pressed && styles.cardPressed]}
-        >
-          <FolderPlus size={20} color={Colors.light.mutedText} />
-          <Text style={styles.emptyTripsText}>Create your first trip to organize your saves</Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
-function DoSection({
-  items,
-  filter,
-  onFilterChange
-}: {
-  items: SavedItem[];
-  filter: DoFilter;
-  onFilterChange: (f: DoFilter) => void;
-}) {
-  const filters: DoFilter[] = ["All", "This Week", "Upcoming", "Anytime", "Map"];
-
-  const filteredItems = useMemo(() => {
-    switch (filter) {
-      case "All":
-        return items;
-      case "This Week":
-        return items.filter(isThisWeekItem);
-      case "Upcoming":
-        return items.filter(isUpcomingItem);
-      case "Anytime":
-        return items.filter(isAnytimeItem);
-      case "Map":
-        return items.filter((it) => !!it.coordinates || !!it.location);
-      default:
-        return items;
+    const endOfWeek = new Date();
+    endOfWeek.setDate(now.getDate() + (7 - now.getDay()));
+    endOfWeek.setHours(23, 59, 59, 999);
+    if (activeFilter === "thisWeek") return items.filter(item => item.dateTimeISO && (() => { const d = new Date(item.dateTimeISO); return d >= now && d <= endOfWeek; })());
+    if (activeFilter === "upcoming") return items.filter(item => item.dateTimeISO && new Date(item.dateTimeISO) > endOfWeek);
+    return items;
+  }, [items, activeFilter]);
+  const initialRegion = useMemo(() => {
+    if (locationItems.length === 0) return { latitude: 37.7749, longitude: -122.4194, latitudeDelta: 0.05, longitudeDelta: 0.05 };
+    const lats = locationItems.map(it => getCoords(it)!.latitude);
+    const lngs = locationItems.map(it => getCoords(it)!.longitude);
+    return {
+      latitude: (Math.min(...lats) + Math.max(...lats)) / 2,
+      longitude: (Math.min(...lngs) + Math.max(...lngs)) / 2,
+      latitudeDelta: Math.max(0.02, (Math.max(...lats) - Math.min(...lats)) * 1.5),
+      longitudeDelta: Math.max(0.02, (Math.max(...lngs) - Math.min(...lngs)) * 1.5),
+    };
+  }, [locationItems]);
+  useEffect(() => {
+    if (mapRef.current && locationItems.length > 0) {
+      const coordinates = locationItems.map(item => getCoords(item)!);
+      setTimeout(() => mapRef.current?.fitToCoordinates(coordinates, { edgePadding: { top: 100, right: 50, bottom: SCREEN_HEIGHT * 0.45, left: 50 }, animated: true }), 500);
     }
-  }, [items, filter]);
+  }, [locationItems]);
+  const snapSheet = useCallback((pos: number) => {
+    const snapped = pos < 0.25 ? 0 : pos < 0.625 ? 0.5 : 1;
+    sheetPositionRef.current = snapped;
+    setIsSheetCollapsed(snapped === 0);
+    Animated.spring(sheetAnim, { toValue: snapped, useNativeDriver: false, tension: 65, friction: 11 }).start();
+  }, [sheetAnim]);
 
-  if (filter === "Map") {
-    return (
-      <View style={styles.doSection}>
+  const toggleSheet = useCallback(() => {
+    const current = sheetPositionRef.current;
+    const next = current === 0 ? 0.5 : current === 0.5 ? 1 : 0.5;
+    sheetPositionRef.current = next;
+    setIsSheetCollapsed(next === 0);
+    Animated.spring(sheetAnim, { toValue: next, useNativeDriver: false, tension: 65, friction: 11 }).start();
+  }, [sheetAnim]);
 
-        <View style={styles.pillRow}>
-          {filters.map((f) => (
-            <Pressable
-              key={f}
-              onPress={() => onFilterChange(f)}
-              style={[styles.pill, filter === f && styles.pillActive]}
-            >
-              {f === "Map" && <Map size={12} color={filter === f ? "#fff" : "rgba(11, 18, 32, 0.5)"} />}
-              <Text style={[styles.pillText, filter === f && styles.pillTextActive]}>{f}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <DoMapView items={items} />
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.doSection}>
-
-      <View style={styles.pillRow}>
-        {filters.map((f) => {
-          const isActive = filter === f;
-          return (
-            <Pressable
-              key={f}
-              onPress={() => onFilterChange(f)}
-              style={[styles.pill, isActive && styles.pillActive]}
-            >
-              {f === "Map" && <Map size={12} color={isActive ? "#fff" : "rgba(11, 18, 32, 0.5)"} />}
-              <Text style={[styles.pillText, isActive && styles.pillTextActive]}>{f}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-      {filteredItems.length === 0 ? (
-        <View style={styles.doEmptyState}>
-          <View style={styles.doEmptyIcon}>
-            <Calendar size={20} color="rgba(11, 18, 32, 0.25)" />
-          </View>
-          <Text style={styles.doEmptyText}>
-            {filter === "This Week" ? "Nothing happening this week" :
-              filter === "Upcoming" ? "Nothing coming up later" :
-                filter === "Anytime" ? "No undated items" : "Nothing found"}
-          </Text>
-          <Pressable
-            onPress={() => router.push("/collect")}
-            style={styles.doEmptyAction}
-          >
-            <Plus size={14} color={Colors.light.tint} />
-            <Text style={styles.doEmptyActionText}>Add a plan</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <View style={styles.doList}>
-          {filteredItems.map((item) => (
-            <DoCard key={item.id} item={item} />
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
-
-
-export default function LibraryScreen() {
-  const { items, isLoading } = useSavedItems();
-  const { trips, isLoading: tripsLoading } = useTrips();
-  const { user, signOut } = useAuth();
-  const [doFilter, setDoFilter] = useState<DoFilter>("All");
-  const insets = useSafeAreaInsets();
-
-  const sortedItems = useMemo(() => {
-    return [...items].sort((a, b) => {
-      if (a.dateTimeISO && b.dateTimeISO) {
-        return new Date(a.dateTimeISO).getTime() - new Date(b.dateTimeISO).getTime();
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 5,
+    onPanResponderGrant: () => { dragStartRef.current = sheetPositionRef.current; },
+    onPanResponderMove: (_, g) => {
+      const delta = -g.dy / SCREEN_HEIGHT;
+      const raw = dragStartRef.current + delta;
+      const clamped = Math.max(0, Math.min(1, raw));
+      sheetAnim.setValue(clamped);
+    },
+    onPanResponderRelease: (_, g) => {
+      if (Math.abs(g.dy) < 10) {
+        toggleSheet();
+        return;
       }
-      if (a.dateTimeISO) return -1;
-      if (b.dateTimeISO) return 1;
-      return 0;
-    });
-  }, [items]);
+      const delta = -g.dy / SCREEN_HEIGHT;
+      const raw = dragStartRef.current + delta;
+      const clamped = Math.max(0, Math.min(1, raw));
+      const velocity = -g.vy / 1000;
+      const withVelocity = clamped + velocity * 0.3;
+      snapSheet(Math.max(0, Math.min(1, withVelocity)));
+    },
+  }), [sheetAnim, snapSheet, toggleSheet]);
 
-  const empty = items.length === 0;
+  const sheetHeight = sheetAnim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [SHEET_COLLAPSED, SHEET_HALF, SHEET_FULL],
+  });
+  const fabOpacity = sheetAnim.interpolate({
+    inputRange: [0, 0.15, 0.5],
+    outputRange: [0, 0, 1],
+  });
+  const fabBottom = sheetAnim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [insets.bottom + 16, insets.bottom + SHEET_HALF - 28, insets.bottom + SHEET_FULL - 28],
+  });
+  const handleItemPress = useCallback((item: SavedItem) => router.push({ pathname: "/modal", params: { id: item.id } }), []);
 
   return (
-    <View style={styles.root} testID="libraryScreen">
-      <Stack.Screen options={{ title: "", headerShown: false }} />
-
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
-        showsVerticalScrollIndicator={Platform.OS === "web"}
-      >
-        <View style={styles.header}>
-          <View style={styles.headerRow}>
-            <View>
-              <Text style={styles.greeting}>Your Plans</Text>
-              {user && <Text style={styles.userEmail}>{user.email}</Text>}
-            </View>
-            <Pressable
-              onPress={signOut}
-              style={({ pressed }) => [styles.signOutBtn, pressed && styles.signOutBtnPressed]}
-              hitSlop={8}
-              testID="signOutButton"
-            >
-              <LogOut size={20} color={Colors.light.mutedText} />
-            </Pressable>
-          </View>
+    <GestureHandlerRootView style={styles.root}>
+      <View style={styles.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={styles.mapContainer}>
+          {NativeMapView ? (
+            <NativeMapView key={`home-map-${locationItems.length}`} ref={mapRef} style={styles.map} initialRegion={initialRegion} showsUserLocation={true} showsMyLocationButton={false} showsCompass={false}>
+              {locationItems.map(item => {
+                const coords = getCoords(item);
+                return coords ? (
+                <NativeMarker key={item.id} coordinate={coords} onPress={() => handleItemPress(item)} tracksViewChanges={false}>
+                  <View style={[styles.marker, selectedId === item.id && styles.markerSelected]}>
+                    <Text style={styles.markerEmoji}>{getCategoryEmoji(item.category, item.title)}</Text>
+                  </View>
+                </NativeMarker>
+                ) : null;
+              })}
+            </NativeMapView>
+          ) : (
+            <LinearGradient colors={['#E8F4FD', '#D0E8FC', '#B8DCFA']} style={styles.mapPlaceholder} />
+          )}
+          {locationItems.length > 0 && <View style={styles.focusCircle} pointerEvents="none"><View style={styles.focusCircleInner} /></View>}
         </View>
-
-        <TripsSection trips={trips} />
-
-        {isLoading ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.loadingText}>Loading...</Text>
+        <LinearGradient colors={['rgba(99, 102, 241, 0.95)', 'rgba(139, 92, 246, 0.85)', 'transparent']} style={[styles.headerGradient, { paddingTop: insets.top + 12 }]}>
+          <View style={styles.headerContent}>
+            <Text style={styles.greetingText}>{greeting},</Text>
+            <Text style={styles.nameText}>{userName}</Text>
+            {upcomingContext && (
+              <Pressable onPress={() => router.push({ pathname: "/modal", params: { id: upcomingContext.itemId } })} style={({ pressed }) => [styles.contextButton, pressed && styles.contextButtonPressed]}>
+                <Text style={styles.contextText}>{upcomingContext.snippet}</Text>
+              </Pressable>
+            )}
+            {!upcomingContext && items.length > 0 && <Text style={styles.contextText}>{items.length} places saved to explore</Text>}
           </View>
-        ) : empty ? (
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIconWrap}>
-              <Bookmark size={32} color={Colors.light.tint} />
+        </LinearGradient>
+        <Animated.View style={[styles.bottomSheet, { height: sheetHeight }]}>
+          <View style={styles.sheetHandle} {...panResponder.panHandlers}>
+            <View style={styles.sheetHandleBar} />
+          </View>
+          <View style={styles.filterRow}>
+            <View style={styles.filterTabs}>
+              <Pressable onPress={() => setActiveFilter("all")} style={[styles.filterTab, activeFilter === "all" && styles.filterTabActive]}><Text style={[styles.filterTabText, activeFilter === "all" && styles.filterTabTextActive]}>All</Text></Pressable>
+              <Pressable onPress={() => setActiveFilter("thisWeek")} style={[styles.filterTab, activeFilter === "thisWeek" && styles.filterTabActive]}><Text style={[styles.filterTabText, activeFilter === "thisWeek" && styles.filterTabTextActive]}>This Week</Text></Pressable>
+              <Pressable onPress={() => setActiveFilter("upcoming")} style={[styles.filterTab, activeFilter === "upcoming" && styles.filterTabActive]}><Text style={[styles.filterTabText, activeFilter === "upcoming" && styles.filterTabTextActive]}>Upcoming</Text></Pressable>
             </View>
-            <Text style={styles.emptyTitle}>Start your collection</Text>
-            <Text style={styles.emptyText}>
-              Save screenshots of places, events, and ideas you want to explore later.
-            </Text>
-            <Pressable
-              onPress={() => router.push("/collect")}
-              style={styles.emptyButton}
-              testID="emptyAddButton"
-            >
-              <Plus size={18} color="#fff" />
-              <Text style={styles.emptyButtonText}>Add first save</Text>
-            </Pressable>
+            <View style={styles.filterRight}>
+              <Pressable onPress={() => router.push("/settings")} style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}><Settings size={20} color={Colors.light.mutedText} /></Pressable>
+            </View>
           </View>
-        ) : (
-          <View style={styles.sectionsWrap}>
-            <DoSection items={sortedItems} filter={doFilter} onFilterChange={setDoFilter} />
-          </View>
-        )}
-      </ScrollView>
-
-      {!empty && (
-        <Pressable
-          onPress={() => router.push("/collect")}
-          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
-          testID="fabButton"
-        >
-          <Plus size={24} color="#fff" />
-        </Pressable>
-      )}
-    </View>
+          {isLoading && !categorizedItems.length ? (
+            <View style={styles.emptyState}><Text style={styles.emptyText}>Loading...</Text></View>
+          ) : categorizedItems.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyEmoji}>{activeFilter === "all" ? "🗺️" : activeFilter === "thisWeek" ? "📅" : "🔮"}</Text>
+              <Text style={styles.emptyTitle}>{activeFilter === "all" ? "No places yet" : activeFilter === "thisWeek" ? "Nothing this week" : "No upcoming events"}</Text>
+              <Text style={styles.emptyText}>{activeFilter === "all" ? "Add screenshots of places you want to visit" : "Events with dates will appear here"}</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={categorizedItems}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <PlaceItem item={item} isSelected={selectedId === item.id} onPress={() => handleItemPress(item)} onDelete={() => removeItem(item.id)} />
+              )}
+              style={styles.placesList}
+              contentContainerStyle={styles.placesListContent}
+              showsVerticalScrollIndicator={false}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={5}
+              windowSize={3}
+              initialNumToRender={6}
+            />
+          )}
+        </Animated.View>
+        <Animated.View pointerEvents={isSheetCollapsed ? "none" : "box-none"} style={[styles.fabContainer, { bottom: fabBottom, opacity: fabOpacity }]}>
+          <Pressable onPress={() => router.push("/collect")} style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}>
+            <LinearGradient colors={['#6366F1', '#8B5CF6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.fabGradient}>
+              <Plus size={20} color="#fff" strokeWidth={2.5} />
+              <Text style={styles.fabText}>Add a place to visit</Text>
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
+      </View>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: "#FAFAF8",
-  },
-  content: {
-    paddingBottom: 120,
-  },
-  header: {
-    paddingHorizontal: 24,
-    marginBottom: 20,
-  },
-  headerRow: {
-    flexDirection: "row" as const,
-    justifyContent: "space-between" as const,
-    alignItems: "flex-start" as const,
-  },
-  userEmail: {
-    fontSize: 13,
-    color: Colors.light.mutedText,
-    marginTop: 2,
-  },
-  signOutBtn: {
-    padding: 8,
-    borderRadius: 10,
-    backgroundColor: "rgba(11, 18, 32, 0.05)",
-  },
-  signOutBtnPressed: {
-    backgroundColor: "rgba(11, 18, 32, 0.1)",
-  },
-  greeting: {
-    fontSize: 28,
-    fontWeight: "700" as const,
-    color: Colors.light.text,
-    letterSpacing: -0.6,
-  },
-  sectionsWrap: {
-    flex: 1,
-  },
-
-  doSection: {
-    flex: 1,
-    gap: 16,
-  },
-
-  pillRow: {
-    flexDirection: "row" as const,
-    gap: 8,
-    paddingHorizontal: 24,
-  },
-  pill: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 5,
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    backgroundColor: "rgba(11, 18, 32, 0.05)",
-  },
-  pillActive: {
-    backgroundColor: Colors.light.text,
-  },
-  pillText: {
-    fontSize: 13,
-    fontWeight: "500" as const,
-    color: "rgba(11, 18, 32, 0.5)",
-  },
-  pillTextActive: {
-    color: "#fff",
-  },
-  doEmptyState: {
-    alignItems: "center" as const,
-    paddingVertical: 48,
-    paddingHorizontal: 40,
-    gap: 12,
-  },
-  doEmptyIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "rgba(11, 18, 32, 0.04)",
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    marginBottom: 4,
-  },
-  doEmptyText: {
-    fontSize: 14,
-    color: "rgba(11, 18, 32, 0.4)",
-    textAlign: "center" as const,
-  },
-  doEmptyAction: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 6,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    backgroundColor: "rgba(28, 93, 153, 0.08)",
-    marginTop: 8,
-  },
-  doEmptyActionText: {
-    fontSize: 13,
-    fontWeight: "500" as const,
-    color: Colors.light.tint,
-  },
-
-  doList: {
-    gap: 2,
-  },
-  doCard: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    gap: 12,
-  },
-  cardPressed: {
-    backgroundColor: "rgba(0,0,0,0.02)",
-  },
-  doCardThumbContainer: {
-    width: 48,
-    height: 48,
-    justifyContent: "center" as const,
-    alignItems: "center" as const,
-  },
-  doCardThumb: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
-    backgroundColor: "#F0F0EE",
-    overflow: "hidden" as const,
-    transform: [{ rotate: "-3deg" }],
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  doCardImage: {
-    width: "100%",
-    height: "100%",
-  },
-  doCardPlaceholder: {
-    flex: 1,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-  },
-  doCardContent: {
-    flex: 1,
-    gap: 2,
-  },
-  doCardTitle: {
-    fontSize: 15,
-    fontWeight: "600" as const,
-    color: Colors.light.text,
-    letterSpacing: -0.2,
-  },
-  doCardMeta: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 8,
-  },
-  doCardLocation: {
-    fontSize: 13,
-    color: Colors.light.mutedText,
-    flex: 1,
-  },
-  doCardTime: {
-    fontSize: 12,
-    color: "rgba(11, 18, 32, 0.4)",
-  },
-  doCardAction: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(28, 93, 153, 0.08)",
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-  },
-  doCardActionPressed: {
-    backgroundColor: "rgba(28, 93, 153, 0.15)",
-  },
-
-  emptyState: {
-    alignItems: "center" as const,
-    paddingVertical: 80,
-    paddingHorizontal: 40,
-  },
-  emptyIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "rgba(28, 93, 153, 0.08)",
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    marginBottom: 24,
-  },
-  emptyTitle: {
-    fontSize: 22,
-    fontWeight: "600" as const,
-    color: Colors.light.text,
-    marginBottom: 8,
-    letterSpacing: -0.4,
-  },
-  emptyText: {
-    fontSize: 15,
-    color: Colors.light.mutedText,
-    textAlign: "center" as const,
-    lineHeight: 22,
-    marginBottom: 28,
-  },
-  emptyButton: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 8,
-    backgroundColor: Colors.light.text,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-  },
-  emptyButtonText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "600" as const,
-  },
-  loadingText: {
-    fontSize: 15,
-    color: Colors.light.mutedText,
-  },
-  fab: {
-    position: "absolute" as const,
-    alignSelf: "center" as const,
-    left: "50%" as const,
-    marginLeft: -28,
-    bottom: 32,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.light.text,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
-  },
-  fabPressed: {
-    transform: [{ scale: 0.95 }],
-  },
-  mapViewContainer: {
-    flex: 1,
-    marginHorizontal: 24,
-    marginTop: 16,
-    borderRadius: 16,
-    overflow: "hidden" as const,
-    backgroundColor: "#E8E8E6",
-    minHeight: 320,
-  },
-  mapView: {
-    flex: 1,
-    minHeight: 320,
-  },
-  mapEmptyOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "center" as const,
-    alignItems: "center" as const,
-    backgroundColor: "rgba(250, 250, 248, 0.85)",
-  },
-  mapEmptyCard: {
-    alignItems: "center" as const,
-    gap: 8,
-    padding: 24,
-  },
-  mapEmptyText: {
-    fontSize: 14,
-    color: "rgba(11, 18, 32, 0.4)",
-  },
-  webMapFallback: {
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    paddingVertical: 32,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(11, 18, 32, 0.06)",
-  },
-  webMapFallbackTitle: {
-    fontSize: 16,
-    fontWeight: "600" as const,
-    color: Colors.light.text,
-    marginTop: 8,
-  },
-  webMapFallbackText: {
-    fontSize: 13,
-    color: "rgba(11, 18, 32, 0.5)",
-  },
-  webMapList: {
-    flex: 1,
-  },
-  webMapListContent: {
-    padding: 16,
-    gap: 8,
-  },
-  webMapItem: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    backgroundColor: "#fff",
-    borderRadius: 10,
-  },
-  webMapItemContent: {
-    flex: 1,
-    gap: 2,
-  },
-  webMapItemTitle: {
-    fontSize: 14,
-    fontWeight: "500" as const,
-    color: Colors.light.text,
-  },
-  webMapItemLocation: {
-    fontSize: 12,
-    color: "rgba(11, 18, 32, 0.5)",
-  },
-  emojiMarker: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.05)",
-  },
-  emojiText: {
-    fontSize: 18,
-  },
-  tripsSection: {
-    paddingHorizontal: 24,
-    marginBottom: 24,
-  },
-  tripsSectionHeader: {
-    flexDirection: "row" as const,
-    justifyContent: "space-between" as const,
-    alignItems: "center" as const,
-    marginBottom: 12,
-  },
-  tripsSectionTitle: {
-    fontSize: 18,
-    fontWeight: "600" as const,
-    color: Colors.light.text,
-    letterSpacing: -0.3,
-  },
-  newTripButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(28, 93, 153, 0.08)",
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-  },
-  newTripButtonPressed: {
-    backgroundColor: "rgba(28, 93, 153, 0.15)",
-  },
-  tripsList: {
-    gap: 10,
-  },
-  tripCard: {
-    backgroundColor: Colors.light.card,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-  },
-  tripCardContent: {
-    gap: 4,
-  },
-  tripCardTitle: {
-    fontSize: 16,
-    fontWeight: "600" as const,
-    color: Colors.light.text,
-    letterSpacing: -0.2,
-  },
-  tripCardDate: {
-    fontSize: 13,
-    color: Colors.light.mutedText,
-  },
-  emptyTripsCard: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 12,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderStyle: "dashed" as const,
-    borderColor: Colors.light.border,
-    backgroundColor: "rgba(11, 18, 32, 0.02)",
-  },
-  emptyTripsText: {
-    fontSize: 14,
-    color: Colors.light.mutedText,
-    flex: 1,
-  },
+  root: { flex: 1 },
+  container: { flex: 1, backgroundColor: Colors.light.background },
+  mapContainer: { ...StyleSheet.absoluteFillObject },
+  map: { flex: 1 },
+  mapPlaceholder: { flex: 1 },
+  focusCircle: { position: "absolute", top: "30%", left: "50%", marginLeft: -75, width: 150, height: 150, borderRadius: 75, borderWidth: 3, borderColor: "rgba(99, 102, 241, 0.5)", alignItems: "center", justifyContent: "center" },
+  focusCircleInner: { width: 130, height: 130, borderRadius: 65, backgroundColor: "rgba(99, 102, 241, 0.15)" },
+  marker: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, borderWidth: 2, borderColor: "#fff" },
+  markerSelected: { borderColor: "#6366F1", borderWidth: 3, transform: [{ scale: 1.1 }] },
+  markerEmoji: { fontSize: 22 },
+  headerGradient: { position: "absolute", top: 0, left: 0, right: 0, paddingBottom: 60 },
+  headerContent: { alignItems: "center", paddingHorizontal: 20 },
+  greetingText: { fontSize: 16, fontWeight: "500", color: "rgba(255,255,255,0.9)", textShadowColor: "rgba(0,0,0,0.1)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  nameText: { fontSize: 28, fontWeight: "700", color: "#fff", letterSpacing: -0.5, textShadowColor: "rgba(0,0,0,0.1)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4, marginTop: 2 },
+  contextButton: { marginTop: 6, backgroundColor: "rgba(255,255,255,0.15)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, alignSelf: "center" },
+  contextButtonPressed: { opacity: 0.7 },
+  contextText: { fontSize: 14, color: "#fff", fontWeight: "600" },
+  bottomSheet: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#fff", borderTopLeftRadius: 28, borderTopRightRadius: 28, shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 20, shadowOffset: { width: 0, height: -4 }, elevation: 20, overflow: "hidden" },
+  sheetHandle: { alignItems: "center", paddingVertical: 16, minHeight: 44 },
+  sheetHandleBar: { width: 40, height: 4, borderRadius: 2, backgroundColor: "#E5E5EA" },
+  filterRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, gap: 10, marginBottom: 16 },
+  filterTabs: { flex: 1, flexDirection: "row", gap: 8 },
+  filterTab: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: "#F2F2F7" },
+  filterTabActive: { backgroundColor: "#6366F1" },
+  filterTabText: { fontSize: 14, fontWeight: "600", color: Colors.light.mutedText },
+  filterTabTextActive: { color: "#fff" },
+  filterRight: { flexDirection: "row", gap: 8 },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#F2F2F7", alignItems: "center", justifyContent: "center" },
+  iconBtnPressed: { opacity: 0.7 },
+  placesList: { flex: 1 },
+  placesListContent: { paddingBottom: 100 },
+  placeItem: { flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: "rgba(0,0,0,0.05)", gap: 14, backgroundColor: "#fff" },
+  placeItemPressed: { opacity: 0.7 },
+  swipeableContainer: { backgroundColor: "#FF3B30" },
+  placeThumbnailContainer: { width: 52, height: 52, borderRadius: 12, overflow: "hidden", backgroundColor: "#F2F2F7" },
+  placeThumbnail: { width: 52, height: 52 },
+  placeThumbnailPlaceholder: { width: 52, height: 52, alignItems: "center", justifyContent: "center" },
+  placeEmoji: { fontSize: 24 },
+  placeContent: { flex: 1 },
+  placeTitle: { fontSize: 16, fontWeight: "600", color: Colors.light.text, marginBottom: 2 },
+  placeCategory: { fontSize: 13, color: Colors.light.mutedText, textTransform: "capitalize", marginTop: 2 },
+  checkBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: "#6366F1", alignItems: "center", justifyContent: "center" },
+  swipeDeleteBtn: { backgroundColor: "#FF3B30", justifyContent: "center", alignItems: "center", width: 90, flexDirection: "column", gap: 4 },
+  swipeDeleteText: { color: "#fff", fontSize: 12, fontWeight: "600" },
+  emptyState: { alignItems: "center", paddingVertical: 40, paddingHorizontal: 20 },
+  emptyEmoji: { fontSize: 48, marginBottom: 12 },
+  emptyTitle: { fontSize: 18, fontWeight: "600", color: Colors.light.text, marginBottom: 6 },
+  emptyText: { fontSize: 14, color: Colors.light.mutedText, textAlign: "center" },
+  fabContainer: { position: "absolute", left: 0, right: 0, alignItems: "center" },
+  fab: { borderRadius: 28, shadowColor: "#6366F1", shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 8 },
+  fabPressed: { opacity: 0.9, transform: [{ scale: 0.97 }] },
+  fabGradient: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 16, paddingHorizontal: 28, borderRadius: 28 },
+  fabText: { fontSize: 16, fontWeight: "600", color: "#fff" },
 });

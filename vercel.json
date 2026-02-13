@@ -1,6 +1,9 @@
 {
     "buildCommand": "npm run build:web",
     "outputDirectory": "dist",
+    "rewrites": [
+        { "source": "/((?!_expo|favicon|metadata).*)", "destination": "/index.html" }
+    ],
     "devCommand": "npx expo start --web",
     "framework": null,
     "installCommand": "npm install --legacy-peer-deps",

@@ -1,13 +1,12 @@
 {
   "expo": {
-    "name": "SnapKeep Organizer",
+    "name": "Breadcrumbs (beta)",
     "slug": "snapkeep-organizer",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rork-app",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
@@ -16,6 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "app.rork.snapkeep-organizer",
+      "buildNumber": "1",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos",
         "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera",
@@ -34,9 +34,10 @@
       "package": "app.rork.snapkeep_organizer",
       "permissions": [
         "android.permission.VIBRATE",
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -67,6 +68,17 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "jsEngine": "hermes",
+    "newArchEnabled": false,
+    "extra": {
+      "router": {
+        "origin": "https://rork.com/"
+      },
+      "eas": {
+        "projectId": "f5a3f711-5b7c-4c38-a7aa-486a94adb169"
+      }
+    },
+    "owner": "jaggerb"
   }
 }

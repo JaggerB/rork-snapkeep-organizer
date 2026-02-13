@@ -140,6 +140,83 @@ export async function lookupLocationCoordinates(params: {
   };
 }
 
+/**
+ * Fetch coordinates from a place ID via Place Details API.
+ * Use as fallback when text search returns no coords but we have placeId from Maps grounding.
+ */
+export async function fetchCoordinatesFromPlaceId(
+  placeId: string
+): Promise<LocationLookupResult> {
+  if (!GEMINI_API_KEY) {
+    return { latitude: null, longitude: null, formattedAddress: null, mapsUrl: null };
+  }
+  const id = placeId.replace(/^places\//, "");
+  if (!id) {
+    return { latitude: null, longitude: null, formattedAddress: null, mapsUrl: null };
+  }
+  try {
+    const url = `https://places.googleapis.com/v1/places/${encodeURIComponent(id)}`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GEMINI_API_KEY,
+        "X-Goog-FieldMask": "location,formattedAddress",
+      },
+    });
+    if (!response.ok) {
+      const err = await response.text();
+      console.warn("[fetchCoordinatesFromPlaceId] API error:", response.status, err);
+      return { latitude: null, longitude: null, formattedAddress: null, mapsUrl: null };
+    }
+    const data = await response.json();
+    const lat = data.location?.latitude ?? null;
+    const lng = data.location?.longitude ?? null;
+    const formattedAddress = data.formattedAddress ?? null;
+    if (lat != null && lng != null) {
+      const queryEncoded = encodeURIComponent(formattedAddress || id);
+      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${queryEncoded}`;
+      return { latitude: lat, longitude: lng, formattedAddress, mapsUrl };
+    }
+    return { latitude: null, longitude: null, formattedAddress: null, mapsUrl: null };
+  } catch (e) {
+    console.warn("[fetchCoordinatesFromPlaceId] Error:", e);
+    return { latitude: null, longitude: null, formattedAddress: null, mapsUrl: null };
+  }
+}
+
+export type PlaceDetailsResult = {
+  websiteUri: string | null;
+};
+
+/**
+ * Fetch website and other details from Place Details API.
+ * Use when viewing an item that has placeId but no websiteUri stored.
+ */
+export async function fetchPlaceDetailsFromPlaceId(placeId: string): Promise<PlaceDetailsResult> {
+  if (!GEMINI_API_KEY) return { websiteUri: null };
+  const id = placeId.replace(/^places\//, "");
+  if (!id) return { websiteUri: null };
+  try {
+    const url = `https://places.googleapis.com/v1/places/${encodeURIComponent(id)}`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GEMINI_API_KEY,
+        "X-Goog-FieldMask": "websiteUri",
+      },
+    });
+    if (!response.ok) return { websiteUri: null };
+    const data = await response.json();
+    const websiteUri = data.websiteUri ?? null;
+    return { websiteUri: typeof websiteUri === "string" ? websiteUri : null };
+  } catch (e) {
+    console.warn("[fetchPlaceDetailsFromPlaceId] Error:", e);
+    return { websiteUri: null };
+  }
+}
+
 export function generateGoogleMapsUrl(params: {
   latitude?: number | null;
   longitude?: number | null;

@@ -3,8 +3,8 @@ import { SavedItemsProvider } from "@/providers/saved-items";
 import { TripsProvider } from "@/providers/trips";
 import Colors from "@/constants/colors";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack, useRouter, useSegments } from "expo-router";
-import React, { useEffect } from "react";
+import { Redirect, Stack, useSegments } from "expo-router";
+import React from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 
@@ -46,19 +46,6 @@ class ErrorBoundary extends React.Component<
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
   const segments = useSegments();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (isLoading) return;
-
-    const inAuthGroup = segments[0] === "sign-in" || segments[0] === "sign-up";
-
-    if (!isAuthenticated && !inAuthGroup) {
-      router.replace("/sign-in");
-    } else if (isAuthenticated && inAuthGroup) {
-      router.replace("/(tabs)");
-    }
-  }, [isAuthenticated, isLoading, segments, router]);
 
   if (isLoading) {
     return (
@@ -66,6 +53,15 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         <ActivityIndicator size="large" color={Colors.light.tint} />
       </View>
     );
+  }
+
+  // Declarative redirects — no useEffect, avoids "Maximum update depth exceeded"
+  const inAuthGroup = segments[0] === "sign-in" || segments[0] === "sign-up";
+  if (!isAuthenticated && !inAuthGroup) {
+    return <Redirect href="/sign-in" />;
+  }
+  if (isAuthenticated && inAuthGroup) {
+    return <Redirect href="/(tabs)" />;
   }
 
   return <>{children}</>;
@@ -86,7 +82,15 @@ function RootLayoutNav() {
         />
         <Stack.Screen
           name="modal"
-          options={{ presentation: "modal", title: "Details" }}
+          options={{ presentation: "modal", headerShown: false }}
+        />
+        <Stack.Screen
+          name="settings"
+          options={{ presentation: "modal", title: "Settings" }}
+        />
+        <Stack.Screen
+          name="itinerary"
+          options={{ presentation: "modal", title: "Plan itinerary" }}
         />
         <Stack.Screen name="+not-found" options={{ title: "Not found" }} />
       </Stack>

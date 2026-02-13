@@ -13,10 +13,33 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    const hasSupabase = !!(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+
+    if (!hasSupabase) {
+      console.warn("[Auth] Supabase env vars missing - add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in Vercel");
+      setIsLoading(false);
+      return;
+    }
+
+    // Timeout: if getSession hangs, stop loading so user sees sign-in
+    const timeoutId = setTimeout(() => {
+      if (cancelled) return;
+      console.warn("[Auth] getSession timed out");
+      setIsLoading(false);
+    }, 10000);
+
     // 1. Fetch initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return;
+      clearTimeout(timeoutId);
       setSession(session);
       setUser(session?.user ?? null);
+      setIsLoading(false);
+    }).catch((err) => {
+      if (cancelled) return;
+      clearTimeout(timeoutId);
+      console.error("[Auth] getSession failed:", err);
       setIsLoading(false);
     });
 
@@ -28,6 +51,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     });
 
     return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
       subscription.unsubscribe();
     };
   }, []);
@@ -104,6 +129,29 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, []);
 
+  const updateProfile = useCallback(
+    async (updates: { name?: string }): Promise<boolean> => {
+      setError(null);
+      if (!updates.name?.trim()) {
+        setError("Name is required");
+        return false;
+      }
+
+      const { error } = await supabase.auth.updateUser({
+        data: { name: updates.name.trim() },
+      });
+
+      if (error) {
+        console.error("[Auth] Update profile error:", error.message);
+        setError(error.message);
+        return false;
+      }
+
+      return true;
+    },
+    []
+  );
+
   const clearError = useCallback(() => {
     setError(null);
   }, []);
@@ -117,6 +165,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     signUp,
     signIn,
     signOut,
+    updateProfile,
     clearError,
   };
 });
